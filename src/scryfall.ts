@@ -39,7 +39,7 @@ export async function searchCommanders(query: string): Promise<string[]> {
     const res = await fetch(url, {
       signal: ctrl.signal,
       headers: {
-        'User-Agent': 'edh-ladder-discord-bot/1.0',
+        'User-Agent': 'mtg-edh-ladder-bot/1.0',
         Accept: 'application/json',
       },
     });
@@ -84,7 +84,7 @@ export async function resolveCommander(name: string): Promise<string | null> {
     const res = await fetch(url, {
       signal: ctrl.signal,
       headers: {
-        'User-Agent': 'edh-ladder-discord-bot/1.0',
+        'User-Agent': 'mtg-edh-ladder-bot/1.0',
         Accept: 'application/json',
       },
     });

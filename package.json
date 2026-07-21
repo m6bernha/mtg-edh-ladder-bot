@@ -1,5 +1,5 @@
 {
-  "name": "edh-ladder",
+  "name": "mtg-edh-ladder-bot",
   "private": true,
   "type": "module",
   "scripts": {

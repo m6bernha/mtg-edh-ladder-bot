@@ -5,7 +5,7 @@ import { InteractionType, ResponseType, type Env, type Interaction } from './typ
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (request.method === 'GET') return new Response('edh-ladder is up ⚔️');
+    if (request.method === 'GET') return new Response('MTG EDH Ladder is up ⚔️');
     if (request.method !== 'POST') return new Response('method not allowed', { status: 405 });
 
     const signature = request.headers.get('x-signature-ed25519');

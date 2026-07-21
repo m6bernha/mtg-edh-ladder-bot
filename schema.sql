@@ -1,4 +1,4 @@
--- edh-ladder D1 schema
+-- mtg-edh-ladder-bot D1 schema
 -- Ratings on players are the *current* values; everything else (W/L, win%,
 -- placements, streaks) is derived from game history so nothing can drift.
 
