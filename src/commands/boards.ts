@@ -10,6 +10,12 @@ import {
 import { displayName, invoker, opt, resolvedUser } from '../discord/options';
 import type { Env, Interaction, MessageData } from '../types';
 
+/** How many recent games feed the form string and the Elo trend on /stats. */
+const RECENT_FORM_GAMES = 5;
+
+/** A commander needs this many games before it can be called someone's "best". */
+const MIN_GAMES_FOR_BEST_COMMANDER = 3;
+
 export async function handleLeaderboard(i: Interaction, env: Env): Promise<MessageData> {
   const guildId = i.guild_id;
   if (!guildId) return errorMessage('Run this in a server.');
@@ -49,9 +55,11 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
     if (result(g) === first) streakLen++;
     else break;
   }
-  const last5 = games.slice(0, 5);
-  const form = last5.map(result).reverse(); // oldest→newest
-  const eloTrend5 = Math.round(last5.reduce((acc, g) => acc + (g.elo_after - g.elo_before), 0));
+  const recent = games.slice(0, RECENT_FORM_GAMES);
+  const form = recent.map(result).reverse(); // oldest→newest
+  const eloTrendRecent = Math.round(
+    recent.reduce((acc, g) => acc + (g.elo_after - g.elo_before), 0),
+  );
 
   const byCommander = new Map<string, { games: number; wins: number }>();
   for (const g of games) {
@@ -65,7 +73,7 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
   let best: StatsView['best'];
   for (const [name, c] of byCommander) {
     if (!mostPlayed || c.games > mostPlayed.games) mostPlayed = { name, games: c.games };
-    if (c.games >= 3) {
+    if (c.games >= MIN_GAMES_FOR_BEST_COMMANDER) {
       const winPct = Math.round((c.wins / c.games) * 100);
       if (!best || winPct > best.winPct) best = { name, winPct, games: c.games };
     }
@@ -88,7 +96,7 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
       games.reduce((acc, g) => acc + (g.ended_at - g.started_at), 0) / games.length,
     streak: `${first}${streakLen}`,
     form,
-    eloTrend5,
+    eloTrendRecent,
     mostPlayed,
     best,
   };

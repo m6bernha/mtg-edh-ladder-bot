@@ -60,7 +60,11 @@ export function isAdmin(permissions: string | undefined): boolean {
   try {
     const bits = BigInt(permissions);
     return (bits & 0x8n) !== 0n || (bits & 0x20n) !== 0n;
-  } catch {
+  } catch (e) {
+    // Malformed bitfield — deny by default, but make it visible. Discord sends
+    // this as a decimal string, so a parse failure means the payload shape
+    // changed and permission checks are silently failing closed.
+    console.warn('isAdmin: could not parse permission bitfield:', e);
     return false;
   }
 }

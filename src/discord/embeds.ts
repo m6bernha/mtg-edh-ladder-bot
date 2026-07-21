@@ -11,6 +11,11 @@ export const COLORS = {
 
 const MEDALS = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣'];
 
+// The leaderboard renders inside a Discord code block, so it relies on a
+// fixed-width layout. Names are truncated, then padded, to keep columns aligned.
+const NAME_MAX_CHARS = 13;
+const NAME_COLUMN_WIDTH = 15;
+
 export function errorMessage(msg: string): MessageData {
   return { embeds: [{ description: `❌ ${msg}`, color: COLORS.error }] };
 }
@@ -103,7 +108,7 @@ export function leaderboardMessage(rows: LeaderboardRow[]): MessageData {
   const header = ' #  Player          SR    Elo  Record    Win%';
   const lines = rows.map((r, i) => {
     const rank = String(i + 1).padStart(2);
-    const name = r.username.slice(0, 13).padEnd(15);
+    const name = r.username.slice(0, NAME_MAX_CHARS).padEnd(NAME_COLUMN_WIDTH);
     const sr = String(skillRating(r.ts_mu, r.ts_sigma)).padStart(4);
     const elo = String(Math.round(r.elo)).padStart(5);
     const losses = r.games - r.wins - r.draws;
@@ -138,7 +143,7 @@ export interface StatsView {
   avgDuration: number;
   streak: string; // e.g. "W3"
   form: string[]; // oldest→newest, up to 5 of W/L/D
-  eloTrend5: number;
+  eloTrendRecent: number;
   mostPlayed?: { name: string; games: number };
   best?: { name: string; winPct: number; games: number };
 }
@@ -174,7 +179,7 @@ export function statsMessage(v: StatsView): MessageData {
             name: 'Momentum',
             value:
               `Streak **${v.streak}** · Form ${v.form.join(' ')} · ` +
-              `Elo ${signed(v.eloTrend5)} over last ${Math.min(v.games, 5)}`,
+              `Elo ${signed(v.eloTrendRecent)} over last ${v.form.length}`,
           },
           { name: 'Pace', value: `Avg game ${fmtDuration(v.avgDuration)}` },
           { name: 'Commanders', value: commanders },

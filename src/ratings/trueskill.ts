@@ -53,10 +53,20 @@ export function computeTrueSkill(
   return out;
 }
 
+// mu - 3*sigma is TrueSkill's conservative skill estimate: the rating we are
+// ~99.7% confident the player exceeds. It lives on a roughly 0-50 scale, which
+// reads as meaningless to players, so we stretch it into FaceIt-like territory.
+// SCALE widens the visible gap between skill levels; OFFSET lifts a fresh
+// player (mu 25, sigma 25/3) off zero to a recognisable starting number.
+const SR_SCALE = 40;
+const SR_OFFSET = 500;
+
 /**
  * FaceIt-feeling display number from the conservative TrueSkill estimate.
- * Fresh players start around 500 and climb as sigma shrinks.
+ * Fresh players start around 500 and climb as sigma shrinks — early games move
+ * SR fast because the system is still resolving uncertainty, not because the
+ * player improved.
  */
 export function skillRating(mu: number, sigma: number): number {
-  return Math.max(0, Math.round((mu - 3 * sigma) * 40 + 500));
+  return Math.max(0, Math.round((mu - 3 * sigma) * SR_SCALE + SR_OFFSET));
 }

@@ -5,6 +5,18 @@ const CACHE = new Map<string, { at: number; names: string[] }>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX = 200;
 
+// Autocomplete cannot be deferred: Discord closes the interaction after 3s, so
+// this budget must leave room for our own response. Resolving a name happens
+// inside an already-deferred command, so it can afford to wait longer.
+const AUTOCOMPLETE_TIMEOUT_MS = 800;
+const RESOLVE_TIMEOUT_MS = 1500;
+
+/** Discord rejects autocomplete responses with more than 25 choices. */
+const MAX_AUTOCOMPLETE_CHOICES = 25;
+
+/** Discord's per-choice label limit; also what we store as a deck identity. */
+const MAX_NAME_CHARS = 100;
+
 /**
  * Forgiving query normalization: case-insensitive and punctuation-insensitive,
  * so "Atraxa, Praetors'" ≡ "atraxa praetors". Hyphens stay (Lim-Dûl etc.);
@@ -34,7 +46,7 @@ export async function searchCommanders(query: string): Promise<string[]> {
     }).toString();
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 800);
+  const timer = setTimeout(() => ctrl.abort(), AUTOCOMPLETE_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
@@ -45,15 +57,21 @@ export async function searchCommanders(query: string): Promise<string[]> {
     });
     if (!res.ok) return []; // 404 = no matches; anything else, fail quiet
     const body = (await res.json()) as { data?: { name: string }[] };
-    const names = (body.data ?? []).slice(0, 25).map((c) => c.name.slice(0, 100));
+    const names = (body.data ?? [])
+      .slice(0, MAX_AUTOCOMPLETE_CHOICES)
+      .map((c) => c.name.slice(0, MAX_NAME_CHARS));
     if (CACHE.size >= CACHE_MAX) {
       const oldest = CACHE.keys().next().value;
       if (oldest !== undefined) CACHE.delete(oldest);
     }
     CACHE.set(q, { at: Date.now(), names });
     return names;
-  } catch {
-    return []; // timeout or network error — user can still type the full name
+  } catch (e) {
+    // Timeout or network error — user can still type the full name. Logged so a
+    // persistent Scryfall outage is visible in `wrangler tail` rather than just
+    // looking like an empty autocomplete.
+    console.warn(`scryfall search failed for ${JSON.stringify(q)}:`, e);
+    return [];
   } finally {
     clearTimeout(timer);
   }
@@ -79,7 +97,7 @@ export async function resolveCommander(name: string): Promise<string | null> {
   const url =
     'https://api.scryfall.com/cards/named?' + new URLSearchParams({ fuzzy: q }).toString();
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 1500);
+  const timer = setTimeout(() => ctrl.abort(), RESOLVE_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       signal: ctrl.signal,
@@ -90,8 +108,11 @@ export async function resolveCommander(name: string): Promise<string | null> {
     });
     if (!res.ok) return null; // 404 = no/ambiguous match
     const card = (await res.json()) as { name?: string };
-    return card.name?.slice(0, 100) ?? null;
-  } catch {
+    return card.name?.slice(0, MAX_NAME_CHARS) ?? null;
+  } catch (e) {
+    // Falls back to storing the name exactly as typed, so a Scryfall outage
+    // never blocks logging a deck.
+    console.warn(`scryfall resolve failed for ${JSON.stringify(q)}:`, e);
     return null;
   } finally {
     clearTimeout(timer);
