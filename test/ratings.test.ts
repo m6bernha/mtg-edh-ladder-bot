@@ -66,7 +66,7 @@ describe('pairwise elo', () => {
 });
 
 describe('trueskill', () => {
-  for (const n of [3, 4, 5, 6]) {
+  for (const n of [2, 3, 4, 5, 6]) {
     it(`updates a ${n}-player pod: winner up, last down, sigma shrinks`, () => {
       const out = computeTrueSkill(evenTS(n), seq(n));
       expect(out[0].mu).toBeGreaterThan(25);

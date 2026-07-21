@@ -237,7 +237,7 @@ export function helpMessage(): MessageData {
         color: COLORS.brand,
         description: [
           '**Playing**',
-          '`/game start` — start a game in this channel, @ the pod (3-6 players), optional bracket. A live timer starts.',
+          '`/game start` — start a game in this channel, @ the pod (2-6 players, 1v1 EDH included), optional bracket. A live timer starts.',
           '`/commander` — (optional) log your commander for the game, with autocomplete.',
           '`/game report` — report placements when it ends: 1st, 2nd, 3rd… Flags: `winner_only`, `draw`.',
           '`/game cancel` — abort the game, nothing counts.',

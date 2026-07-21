@@ -4,13 +4,15 @@ import { isAdmin, validateReport, validateStart } from '../src/validation';
 import type { GamePlayerRow } from '../src/types';
 
 describe('validateStart', () => {
-  it('accepts 3-6 distinct players', () => {
+  it('accepts 2-6 distinct players (1v1 EDH included)', () => {
+    expect(validateStart(['a', 'b']).ok).toBe(true);
     expect(validateStart(['a', 'b', 'c']).ok).toBe(true);
     expect(validateStart(['a', 'b', 'c', 'd', 'e', 'f']).ok).toBe(true);
   });
   it('rejects duplicates and bad counts', () => {
-    expect(validateStart(['a', 'b']).ok).toBe(false);
+    expect(validateStart(['a']).ok).toBe(false);
     expect(validateStart(['a', 'b', 'b']).ok).toBe(false);
+    expect(validateStart(['a', 'b', 'c', 'd', 'e', 'f', 'g']).ok).toBe(false);
   });
 });
 

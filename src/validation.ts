@@ -10,8 +10,8 @@ export type ValidationResult =
   | { ok: false; error: string };
 
 export function validateStart(userIds: string[]): ValidationResult {
-  if (userIds.length < 3 || userIds.length > 6) {
-    return { ok: false, error: 'A pod needs 3-6 players.' };
+  if (userIds.length < 2 || userIds.length > 6) {
+    return { ok: false, error: 'A game needs 2-6 players.' };
   }
   if (new Set(userIds).size !== userIds.length) {
     return { ok: false, error: 'The same player is listed twice.' };

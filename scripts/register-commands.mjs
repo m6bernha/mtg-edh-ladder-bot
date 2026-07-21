@@ -79,7 +79,7 @@ const commands = [
         options: [
           playerSlot(1, true),
           playerSlot(2, true),
-          playerSlot(3, true),
+          playerSlot(3, false),
           playerSlot(4, false),
           playerSlot(5, false),
           playerSlot(6, false),
@@ -93,7 +93,7 @@ const commands = [
         options: [
           placeSlot('first', '1st place — the winner', true),
           placeSlot('second', '2nd place', true),
-          placeSlot('third', '3rd place', true),
+          placeSlot('third', '3rd place', false),
           placeSlot('fourth', '4th place', false),
           placeSlot('fifth', '5th place', false),
           placeSlot('sixth', '6th place', false),
