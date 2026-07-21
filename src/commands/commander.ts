@@ -1,6 +1,6 @@
 import { getActiveOrLatestGame, getRoster, setCommander } from '../db/queries';
 import { errorMessage, successMessage } from '../discord/embeds';
-import { invoker, opt, requireGuildChannel } from '../discord/options';
+import { invoker, optString, requireGuildChannel } from '../discord/options';
 import { combineCommanders, resolveCommander } from '../scryfall';
 import type { Env, Interaction, MessageData } from '../types';
 
@@ -9,9 +9,9 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   if (!ctx.ok) return errorMessage(ctx.error);
   const { guildId, channelId } = ctx;
 
-  const raw = (opt<string>(i.data?.options ?? [], 'name') ?? '').trim().slice(0, 100);
+  const raw = (optString(i.data?.options ?? [], 'name') ?? '').trim().slice(0, 100);
   if (!raw) return errorMessage('Give me a commander name.');
-  const rawPartner = (opt<string>(i.data?.options ?? [], 'partner') ?? '').trim().slice(0, 100);
+  const rawPartner = (optString(i.data?.options ?? [], 'partner') ?? '').trim().slice(0, 100);
 
   // Canonicalize via Scryfall so stats never split across spelling variants.
   const [canonical, canonicalPartner] = await Promise.all([

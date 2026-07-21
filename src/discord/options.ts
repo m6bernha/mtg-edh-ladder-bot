@@ -1,4 +1,35 @@
+import { InteractionType } from '../types';
 import type { DiscordUser, Interaction, InteractionOption } from '../types';
+
+/**
+ * Runtime shape check for the Discord payload. The body is Ed25519-verified
+ * before this runs, so this is not a trust boundary — it stops a malformed or
+ * restructured payload from surfacing as an `undefined` crash deep inside a
+ * handler, and lets us answer 400 instead.
+ *
+ * Requirements are per interaction type on purpose. PING is how Discord
+ * verifies the endpoint URL; holding it to fields it does not need would risk
+ * taking the whole bot offline if Discord ever changes its envelope.
+ */
+export function parseInteraction(body: unknown): Interaction | null {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return null;
+  const i = body as Record<string, unknown>;
+  if (typeof i.type !== 'number') return null;
+
+  const needsResponse =
+    i.type === InteractionType.APPLICATION_COMMAND ||
+    i.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE;
+
+  if (needsResponse) {
+    // Deferred replies are delivered by webhook, which needs both of these,
+    // and every handler dispatches on data.name.
+    if (typeof i.token !== 'string' || typeof i.application_id !== 'string') return null;
+    if (typeof i.data !== 'object' || i.data === null) return null;
+    if (typeof (i.data as Record<string, unknown>).name !== 'string') return null;
+  }
+
+  return i as unknown as Interaction;
+}
 
 /** Unwrap a subcommand: /game start → { name: 'start', options: [...] } */
 export function getSub(i: Interaction): { name: string; options: InteractionOption[] } | null {
@@ -7,8 +38,20 @@ export function getSub(i: Interaction): { name: string; options: InteractionOpti
   return null;
 }
 
-export function opt<T = string>(options: InteractionOption[], name: string): T | undefined {
-  return options.find((o) => o.name === name)?.value as T | undefined;
+/**
+ * Discord delivers user, role and channel options as snowflake strings, so
+ * mention options read through the same accessor as plain string options.
+ * Returns undefined rather than coercing when the payload disagrees with the
+ * registered command schema.
+ */
+export function optString(options: InteractionOption[], name: string): string | undefined {
+  const v = options.find((o) => o.name === name)?.value;
+  return typeof v === 'string' ? v : undefined;
+}
+
+export function optBoolean(options: InteractionOption[], name: string): boolean | undefined {
+  const v = options.find((o) => o.name === name)?.value;
+  return typeof v === 'boolean' ? v : undefined;
 }
 
 /**
@@ -54,7 +97,7 @@ export function resolvedUser(i: Interaction, id: string): DiscordUser | undefine
 export function collectUsers(options: InteractionOption[], names: string[]): string[] {
   const out: string[] = [];
   for (const n of names) {
-    const v = opt<string>(options, n);
+    const v = optString(options, n);
     if (v) out.push(v);
   }
   return out;

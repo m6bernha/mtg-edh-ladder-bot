@@ -7,7 +7,7 @@ import {
   vsMessage,
   type StatsView,
 } from '../discord/embeds';
-import { displayName, invoker, opt, requireGuild, resolvedUser } from '../discord/options';
+import { displayName, invoker, optString, requireGuild, resolvedUser } from '../discord/options';
 import type { Env, Interaction, MessageData } from '../types';
 
 /** How many recent games feed the form string and the Elo trend on /stats. */
@@ -30,7 +30,7 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
   const ctx = requireGuild(i);
   if (!ctx.ok) return errorMessage(ctx.error);
   const { guildId } = ctx;
-  const targetId = opt<string>(i.data?.options ?? [], 'player') ?? invoker(i).id;
+  const targetId = optString(i.data?.options ?? [], 'player') ?? invoker(i).id;
   const player = await getPlayerByDiscordId(env.DB, guildId, targetId);
   if (!player) return errorMessage(`No games recorded for <@${targetId}> yet.`);
   const games = await getPlayerGames(env.DB, player.id);
@@ -108,8 +108,8 @@ export async function handleVs(i: Interaction, env: Env): Promise<MessageData> {
   const ctx = requireGuild(i);
   if (!ctx.ok) return errorMessage(ctx.error);
   const { guildId } = ctx;
-  const aId = opt<string>(i.data?.options ?? [], 'player_a');
-  const bId = opt<string>(i.data?.options ?? [], 'player_b');
+  const aId = optString(i.data?.options ?? [], 'player_a');
+  const bId = optString(i.data?.options ?? [], 'player_b');
   if (!aId || !bId) return errorMessage('Pick two players.');
   if (aId === bId) return errorMessage('Pick two *different* players — no shadowboxing.');
 

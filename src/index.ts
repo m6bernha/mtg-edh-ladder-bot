@@ -1,7 +1,8 @@
 import { verifyKey } from 'discord-interactions';
 import { json } from './discord/api';
+import { parseInteraction } from './discord/options';
 import { routeAutocomplete, routeCommand } from './router';
-import { InteractionType, ResponseType, type Env, type Interaction } from './types';
+import { InteractionType, ResponseType, type Env } from './types';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -17,7 +18,15 @@ export default {
       (await verifyKey(body, signature, timestamp, env.DISCORD_PUBLIC_KEY));
     if (!valid) return new Response('invalid request signature', { status: 401 });
 
-    const interaction = JSON.parse(body) as Interaction;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return new Response('malformed json', { status: 400 });
+    }
+    const interaction = parseInteraction(parsed);
+    if (!interaction) return new Response('unrecognised interaction payload', { status: 400 });
+
     switch (interaction.type) {
       case InteractionType.PING:
         return json({ type: ResponseType.PONG });

@@ -23,7 +23,8 @@ import {
   displayName,
   getSub,
   invoker,
-  opt,
+  optBoolean,
+  optString,
   requireGuildChannel,
   resolvedUser,
 } from '../discord/options';
@@ -60,7 +61,7 @@ export async function handleGameStart(i: Interaction, env: Env): Promise<Message
     );
   }
 
-  const bracket = opt<string>(sub.options, 'bracket') ?? 'open';
+  const bracket = optString(sub.options, 'bracket') ?? 'open';
   const users = ids.map((id) => {
     const u = resolvedUser(i, id);
     return { id, username: u ? displayName(u) : id };
@@ -97,11 +98,11 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
 
   const placements: PlacementInput[] = [];
   PLACE_SLOTS.forEach((name, idx) => {
-    const v = opt<string>(sub.options, name);
+    const v = optString(sub.options, name);
     if (v) placements.push({ userId: v, place: idx + 1 });
   });
-  const draw = opt<boolean>(sub.options, 'draw') ?? false;
-  const winnerOnly = opt<boolean>(sub.options, 'winner_only') ?? false;
+  const draw = optBoolean(sub.options, 'draw') ?? false;
+  const winnerOnly = optBoolean(sub.options, 'winner_only') ?? false;
   const val = validateReport(rosterIds, placements, { draw, winnerOnly });
   if (!val.ok) return errorMessage(val.error);
 
@@ -151,7 +152,7 @@ export async function handleGameBracket(i: Interaction, env: Env): Promise<Messa
   if (!ctx.ok) return errorMessage(ctx.error);
   const { guildId, channelId } = ctx;
   const sub = getSub(i);
-  const bracket = sub ? opt<string>(sub.options, 'bracket') : undefined;
+  const bracket = sub ? optString(sub.options, 'bracket') : undefined;
   if (!bracket) return errorMessage('Pick a bracket.');
 
   const found = await getActiveOrLatestGame(env.DB, guildId, channelId);
