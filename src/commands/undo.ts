@@ -1,13 +1,14 @@
 import { getLatestCompletedGame, getRoster, undoGame } from '../db/queries';
 import { restoreFromSnapshots } from '../db/snapshots';
 import { errorMessage, successMessage } from '../discord/embeds';
-import { invoker } from '../discord/options';
-import { isAdmin } from '../validation';
+import { invoker, requireGuild } from '../discord/options';
+import { isPlayerOrAdmin } from '../validation';
 import type { Env, Interaction, MessageData } from '../types';
 
 export async function handleUndo(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  if (!guildId) return errorMessage('Run this in a server.');
+  const ctx = requireGuild(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId } = ctx;
 
   // Only the newest completed game may ever be undone — undoing an older one
   // would invalidate every snapshot taken after it.
@@ -16,7 +17,7 @@ export async function handleUndo(i: Interaction, env: Env): Promise<MessageData>
 
   const roster = await getRoster(env.DB, game.id);
   const me = invoker(i);
-  if (!roster.some((r) => r.discord_user_id === me.id) && !isAdmin(i.member?.permissions)) {
+  if (!isPlayerOrAdmin(roster, me.id, i.member?.permissions)) {
     return errorMessage('Only players from that game (or admins) can undo it.');
   }
 

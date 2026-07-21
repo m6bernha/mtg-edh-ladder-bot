@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { restoreFromSnapshots } from '../src/db/snapshots';
-import { isAdmin, validateReport, validateStart } from '../src/validation';
+import { isAdmin, isPlayerOrAdmin, validateReport, validateStart } from '../src/validation';
 import type { GamePlayerRow } from '../src/types';
 
 describe('validateStart', () => {
@@ -52,6 +52,27 @@ describe('isAdmin', () => {
     expect(isAdmin('1024')).toBe(false);
     expect(isAdmin(undefined)).toBe(false);
     expect(isAdmin('garbage')).toBe(false);
+  });
+});
+
+describe('isPlayerOrAdmin', () => {
+  const roster = [{ discord_user_id: 'a' }, { discord_user_id: 'b' }];
+  const NO_PERMS = '0';
+  const ADMIN = '8';
+
+  it('allows anyone in the pod, regardless of permissions', () => {
+    expect(isPlayerOrAdmin(roster, 'a', NO_PERMS)).toBe(true);
+    expect(isPlayerOrAdmin(roster, 'b', undefined)).toBe(true);
+  });
+  it('allows an admin who did not play', () => {
+    expect(isPlayerOrAdmin(roster, 'outsider', ADMIN)).toBe(true);
+  });
+  it('rejects a non-admin who did not play', () => {
+    expect(isPlayerOrAdmin(roster, 'outsider', NO_PERMS)).toBe(false);
+    expect(isPlayerOrAdmin(roster, 'outsider', undefined)).toBe(false);
+  });
+  it('rejects everyone when the pod is empty and the caller is not an admin', () => {
+    expect(isPlayerOrAdmin([], 'a', NO_PERMS)).toBe(false);
   });
 });
 

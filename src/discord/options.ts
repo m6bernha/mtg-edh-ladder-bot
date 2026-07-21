@@ -11,6 +11,31 @@ export function opt<T = string>(options: InteractionOption[], name: string): T |
   return options.find((o) => o.name === name)?.value as T | undefined;
 }
 
+/**
+ * Commands that read guild-wide data (leaderboard, stats, vs, undo) need a
+ * guild id. Interactions sent from a DM have none. Returning the id rather than
+ * a boolean lets the caller use it as a plain `string`.
+ */
+export function requireGuild(
+  i: Interaction,
+): { ok: true; guildId: string } | { ok: false; error: string } {
+  if (!i.guild_id) return { ok: false, error: 'Run this in a server.' };
+  return { ok: true, guildId: i.guild_id };
+}
+
+/**
+ * Game commands are scoped to a single channel — one active pod per channel —
+ * so they need both ids.
+ */
+export function requireGuildChannel(
+  i: Interaction,
+): { ok: true; guildId: string; channelId: string } | { ok: false; error: string } {
+  if (!i.guild_id || !i.channel_id) {
+    return { ok: false, error: 'Run this in a server channel.' };
+  }
+  return { ok: true, guildId: i.guild_id, channelId: i.channel_id };
+}
+
 export function invoker(i: Interaction): DiscordUser {
   const u = i.member?.user ?? i.user;
   if (!u) throw new Error('interaction has no user');

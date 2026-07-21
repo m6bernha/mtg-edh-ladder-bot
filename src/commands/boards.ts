@@ -7,7 +7,7 @@ import {
   vsMessage,
   type StatsView,
 } from '../discord/embeds';
-import { displayName, invoker, opt, resolvedUser } from '../discord/options';
+import { displayName, invoker, opt, requireGuild, resolvedUser } from '../discord/options';
 import type { Env, Interaction, MessageData } from '../types';
 
 /** How many recent games feed the form string and the Elo trend on /stats. */
@@ -17,9 +17,9 @@ const RECENT_FORM_GAMES = 5;
 const MIN_GAMES_FOR_BEST_COMMANDER = 3;
 
 export async function handleLeaderboard(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  if (!guildId) return errorMessage('Run this in a server.');
-  const rows = await getLeaderboard(env.DB, guildId);
+  const ctx = requireGuild(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const rows = await getLeaderboard(env.DB, ctx.guildId);
   if (rows.length === 0) {
     return errorMessage('No completed games yet — the ladder starts with your first `/game start`.');
   }
@@ -27,8 +27,9 @@ export async function handleLeaderboard(i: Interaction, env: Env): Promise<Messa
 }
 
 export async function handleStats(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  if (!guildId) return errorMessage('Run this in a server.');
+  const ctx = requireGuild(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId } = ctx;
   const targetId = opt<string>(i.data?.options ?? [], 'player') ?? invoker(i).id;
   const player = await getPlayerByDiscordId(env.DB, guildId, targetId);
   if (!player) return errorMessage(`No games recorded for <@${targetId}> yet.`);
@@ -104,8 +105,9 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
 }
 
 export async function handleVs(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  if (!guildId) return errorMessage('Run this in a server.');
+  const ctx = requireGuild(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId } = ctx;
   const aId = opt<string>(i.data?.options ?? [], 'player_a');
   const bId = opt<string>(i.data?.options ?? [], 'player_b');
   if (!aId || !bId) return errorMessage('Pick two players.');

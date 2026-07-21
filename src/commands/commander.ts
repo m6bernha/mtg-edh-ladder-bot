@@ -1,18 +1,13 @@
-import {
-  getActiveGame,
-  getLatestCompletedGameInChannel,
-  getRoster,
-  setCommander,
-} from '../db/queries';
+import { getActiveOrLatestGame, getRoster, setCommander } from '../db/queries';
 import { errorMessage, successMessage } from '../discord/embeds';
-import { invoker, opt } from '../discord/options';
+import { invoker, opt, requireGuildChannel } from '../discord/options';
 import { combineCommanders, resolveCommander } from '../scryfall';
 import type { Env, Interaction, MessageData } from '../types';
 
 export async function handleCommander(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  const channelId = i.channel_id;
-  if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
+  const ctx = requireGuildChannel(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId, channelId } = ctx;
 
   const raw = (opt<string>(i.data?.options ?? [], 'name') ?? '').trim().slice(0, 100);
   if (!raw) return errorMessage('Give me a commander name.');
@@ -26,14 +21,12 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   const unrecognized = !canonical || (!!rawPartner && !canonicalPartner);
   const name = combineCommanders(canonical ?? raw, rawPartner ? (canonicalPartner ?? rawPartner) : null);
 
-  let game = await getActiveGame(env.DB, guildId, channelId);
-  let note = 'for the game in progress';
-  if (!game) {
-    game = await getLatestCompletedGameInChannel(env.DB, guildId, channelId);
-    if (game) note = `for the game that ended <t:${game.ended_at}:R>`;
-  }
-  if (!game) return errorMessage('No game found in this channel — start one with `/game start`.');
+  const found = await getActiveOrLatestGame(env.DB, guildId, channelId);
+  if (!found) return errorMessage('No game found in this channel — start one with `/game start`.');
+  const { game, note } = found;
 
+  // Deliberately not isPlayerOrAdmin: we need the caller's own roster row to
+  // write against, and an admin has no player_id in a game they did not play.
   const roster = await getRoster(env.DB, game.id);
   const mine = roster.find((r) => r.discord_user_id === invoker(i).id);
   if (!mine) return errorMessage("You're not in that game's pod.");

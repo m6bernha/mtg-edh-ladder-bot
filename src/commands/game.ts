@@ -5,7 +5,7 @@ import {
   completeGame,
   createGame,
   getActiveGame,
-  getLatestCompletedGameInChannel,
+  getActiveOrLatestGame,
   getRoster,
   setBracket,
   upsertPlayers,
@@ -18,17 +18,30 @@ import {
   reportMessage,
   successMessage,
 } from '../discord/embeds';
-import { collectUsers, displayName, getSub, invoker, opt, resolvedUser } from '../discord/options';
-import { isAdmin, validateReport, validateStart, type PlacementInput } from '../validation';
+import {
+  collectUsers,
+  displayName,
+  getSub,
+  invoker,
+  opt,
+  requireGuildChannel,
+  resolvedUser,
+} from '../discord/options';
+import {
+  isPlayerOrAdmin,
+  validateReport,
+  validateStart,
+  type PlacementInput,
+} from '../validation';
 import type { Env, Interaction, MessageData } from '../types';
 
 const PLAYER_SLOTS = ['player1', 'player2', 'player3', 'player4', 'player5', 'player6'];
 const PLACE_SLOTS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
 
 export async function handleGameStart(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  const channelId = i.channel_id;
-  if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
+  const ctx = requireGuildChannel(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId, channelId } = ctx;
   const sub = getSub(i);
   if (!sub) return errorMessage('Missing subcommand.');
 
@@ -65,9 +78,9 @@ export async function handleGameStart(i: Interaction, env: Env): Promise<Message
 }
 
 export async function handleGameReport(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  const channelId = i.channel_id;
-  if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
+  const ctx = requireGuildChannel(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId, channelId } = ctx;
   const sub = getSub(i);
   if (!sub) return errorMessage('Missing subcommand.');
 
@@ -78,7 +91,7 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   const roster = await getRoster(env.DB, active.id);
   const rosterIds = roster.map((r) => r.discord_user_id);
   const me = invoker(i);
-  if (!rosterIds.includes(me.id) && !isAdmin(i.member?.permissions)) {
+  if (!isPlayerOrAdmin(roster, me.id, i.member?.permissions)) {
     return errorMessage('Only players in this game (or admins) can report it.');
   }
 
@@ -134,24 +147,20 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
 }
 
 export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  const channelId = i.channel_id;
-  if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
+  const ctx = requireGuildChannel(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId, channelId } = ctx;
   const sub = getSub(i);
   const bracket = sub ? opt<string>(sub.options, 'bracket') : undefined;
   if (!bracket) return errorMessage('Pick a bracket.');
 
-  let game = await getActiveGame(env.DB, guildId, channelId);
-  let note = 'for the game in progress';
-  if (!game) {
-    game = await getLatestCompletedGameInChannel(env.DB, guildId, channelId);
-    if (game) note = `for the game that ended <t:${game.ended_at}:R>`;
-  }
-  if (!game) return errorMessage('No game found in this channel — start one with `/game start`.');
+  const found = await getActiveOrLatestGame(env.DB, guildId, channelId);
+  if (!found) return errorMessage('No game found in this channel — start one with `/game start`.');
+  const { game, note } = found;
 
   const roster = await getRoster(env.DB, game.id);
   const me = invoker(i);
-  if (!roster.some((r) => r.discord_user_id === me.id) && !isAdmin(i.member?.permissions)) {
+  if (!isPlayerOrAdmin(roster, me.id, i.member?.permissions)) {
     return errorMessage('Only players in that game (or admins) can set its bracket.');
   }
 
@@ -163,18 +172,21 @@ export async function handleGameBracket(i: Interaction, env: Env): Promise<Messa
 }
 
 export async function handleGameCancel(i: Interaction, env: Env): Promise<MessageData> {
-  const guildId = i.guild_id;
-  const channelId = i.channel_id;
-  if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
+  const ctx = requireGuildChannel(i);
+  if (!ctx.ok) return errorMessage(ctx.error);
+  const { guildId, channelId } = ctx;
 
   const active = await getActiveGame(env.DB, guildId, channelId);
   if (!active) return errorMessage('No active game in this channel.');
   const roster = await getRoster(env.DB, active.id);
   const me = invoker(i);
-  if (!roster.some((r) => r.discord_user_id === me.id) && !isAdmin(i.member?.permissions)) {
+  if (!isPlayerOrAdmin(roster, me.id, i.member?.permissions)) {
     return errorMessage('Only players in this game (or admins) can cancel it.');
   }
-  await cancelGame(env.DB, active.id);
+  const cancelled = await cancelGame(env.DB, active.id);
+  if (!cancelled) {
+    return errorMessage('That game was already reported or cancelled — nothing to do.');
+  }
   return successMessage(
     `🗑️ Game cancelled (was running <t:${active.started_at}:R>). Nothing counts — start fresh with \`/game start\`.`,
   );

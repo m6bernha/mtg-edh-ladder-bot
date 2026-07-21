@@ -54,6 +54,23 @@ export function validateReport(
   return { ok: true };
 }
 
+/**
+ * Mutating a game (report, cancel, set bracket, undo) is restricted to the pod
+ * that played it, plus server admins. Callers supply their own message because
+ * the wording differs by command and by whether the game is current or past.
+ *
+ * Note this is deliberately not used by /commander, which must locate the
+ * caller's own roster row to write against — an admin has no player_id in a
+ * game they did not play.
+ */
+export function isPlayerOrAdmin(
+  roster: { discord_user_id: string }[],
+  userId: string,
+  permissions: string | undefined,
+): boolean {
+  return roster.some((r) => r.discord_user_id === userId) || isAdmin(permissions);
+}
+
 /** True if the member permission bitfield contains ADMINISTRATOR or MANAGE_GUILD. */
 export function isAdmin(permissions: string | undefined): boolean {
   if (!permissions) return false;

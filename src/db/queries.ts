@@ -3,6 +3,34 @@ import type { PlayerRatingUpdate } from './snapshots';
 
 const now = () => Math.floor(Date.now() / 1000);
 
+/**
+ * D1 reports failures on the result object rather than by throwing, so an
+ * unchecked write fails silently and the bot cheerfully reports success.
+ */
+function assertWrote(result: D1Result, what: string): void {
+  if (!result.success) throw new Error(`${what} failed`);
+}
+
+/**
+ * Get the active game in this channel, or the most recent completed one.
+ * `/game bracket` and `/commander` both accept a game that has just been
+ * reported, so players can correct it without restarting the pod. The note is
+ * the human phrasing for whichever game we landed on.
+ */
+export async function getActiveOrLatestGame(
+  db: D1Database,
+  guildId: string,
+  channelId: string,
+): Promise<{ game: GameRow; note: string } | null> {
+  const active = await getActiveGame(db, guildId, channelId);
+  if (active) return { game: active, note: 'for the game in progress' };
+
+  const latest = await getLatestCompletedGameInChannel(db, guildId, channelId);
+  if (latest) return { game: latest, note: `for the game that ended <t:${latest.ended_at}:R>` };
+
+  return null;
+}
+
 export async function upsertPlayers(
   db: D1Database,
   guildId: string,
@@ -105,6 +133,7 @@ export async function createGame(
     )
     .bind(guildId, channelId, bracket, startedAt, createdBy)
     .run();
+  assertWrote(res, 'creating the game');
   const gameId = res.meta.last_row_id as number;
   await db.batch(
     playerIds.map((pid) =>
@@ -170,11 +199,19 @@ export async function completeGame(
   return endedAt;
 }
 
-export async function cancelGame(db: D1Database, gameId: number): Promise<void> {
-  await db
+/**
+ * Returns false if the game was no longer active — i.e. somebody reported or
+ * cancelled it between our read and this write. The `status = 'active'` guard
+ * makes that a no-op rather than a corruption, but the caller still needs to
+ * know so it does not claim success.
+ */
+export async function cancelGame(db: D1Database, gameId: number): Promise<boolean> {
+  const res = await db
     .prepare(`UPDATE games SET status = 'cancelled', ended_at = ? WHERE id = ? AND status = 'active'`)
     .bind(now(), gameId)
     .run();
+  assertWrote(res, 'cancelling the game');
+  return res.meta.changes > 0;
 }
 
 /** Atomically mark a game undone and restore every player's pre-game ratings. */
@@ -197,7 +234,11 @@ export async function undoGame(
 }
 
 export async function setBracket(db: D1Database, gameId: number, bracket: string): Promise<void> {
-  await db.prepare('UPDATE games SET bracket = ? WHERE id = ?').bind(bracket, gameId).run();
+  const res = await db
+    .prepare('UPDATE games SET bracket = ? WHERE id = ?')
+    .bind(bracket, gameId)
+    .run();
+  assertWrote(res, 'setting the bracket');
 }
 
 export async function setCommander(
@@ -206,10 +247,11 @@ export async function setCommander(
   playerId: number,
   commander: string,
 ): Promise<void> {
-  await db
+  const res = await db
     .prepare('UPDATE game_players SET commander = ? WHERE game_id = ? AND player_id = ?')
     .bind(commander, gameId, playerId)
     .run();
+  assertWrote(res, 'setting the commander');
 }
 
 export interface LeaderboardRow extends PlayerRow {
