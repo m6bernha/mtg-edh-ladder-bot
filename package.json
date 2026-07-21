@@ -19,5 +19,8 @@
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.112.0"
+  },
+  "overrides": {
+    "mathjs": "^15.2.0"
   }
 }
