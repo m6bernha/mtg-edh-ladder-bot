@@ -6,7 +6,7 @@ import {
 } from '../db/queries';
 import { errorMessage, successMessage } from '../discord/embeds';
 import { invoker, opt } from '../discord/options';
-import { resolveCommander } from '../scryfall';
+import { combineCommanders, resolveCommander } from '../scryfall';
 import type { Env, Interaction, MessageData } from '../types';
 
 export async function handleCommander(i: Interaction, env: Env): Promise<MessageData> {
@@ -16,9 +16,15 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
 
   const raw = (opt<string>(i.data?.options ?? [], 'name') ?? '').trim().slice(0, 100);
   if (!raw) return errorMessage('Give me a commander name.');
+  const rawPartner = (opt<string>(i.data?.options ?? [], 'partner') ?? '').trim().slice(0, 100);
+
   // Canonicalize via Scryfall so stats never split across spelling variants.
-  const canonical = await resolveCommander(raw);
-  const name = canonical ?? raw;
+  const [canonical, canonicalPartner] = await Promise.all([
+    resolveCommander(raw),
+    rawPartner ? resolveCommander(rawPartner) : Promise.resolve(null),
+  ]);
+  const unrecognized = !canonical || (!!rawPartner && !canonicalPartner);
+  const name = combineCommanders(canonical ?? raw, rawPartner ? (canonicalPartner ?? rawPartner) : null);
 
   let game = await getActiveGame(env.DB, guildId, channelId);
   let note = 'for the game in progress';
@@ -33,6 +39,6 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   if (!mine) return errorMessage("You're not in that game's pod.");
 
   await setCommander(env.DB, game.id, mine.player_id, name);
-  const suffix = canonical ? '' : ' *(as typed — Scryfall didn\'t recognize it)*';
+  const suffix = unrecognized ? ' *(part stored as typed — Scryfall didn\'t recognize it)*' : '';
   return successMessage(`🧙 **${name}** locked in ${note}.${suffix}`);
 }

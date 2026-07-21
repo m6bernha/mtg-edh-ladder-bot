@@ -80,7 +80,7 @@ export async function routeAutocomplete(i: Interaction, env: Env): Promise<Respo
   const focused = flat.find((o) => o.focused);
 
   let choices: { name: string; value: string }[] = [];
-  if (i.data?.name === 'commander' && focused?.name === 'name') {
+  if (i.data?.name === 'commander' && (focused?.name === 'name' || focused?.name === 'partner')) {
     const names = await searchCommanders(String(focused.value ?? ''));
     choices = names.map((n) => ({ name: n, value: n }));
   }

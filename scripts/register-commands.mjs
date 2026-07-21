@@ -128,6 +128,12 @@ const commands = [
         required: true,
         autocomplete: true,
       },
+      {
+        type: STRING,
+        name: 'partner',
+        description: 'Second commander — Partner / Background / Friends Forever',
+        autocomplete: true,
+      },
     ],
   },
   { name: 'leaderboard', description: 'All-time ladder — SR, Elo, W-L, win%', contexts: [0] },

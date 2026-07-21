@@ -60,6 +60,15 @@ export async function searchCommanders(query: string): Promise<string[]> {
 }
 
 /**
+ * Combine a commander (and optional partner) into one canonical deck identity.
+ * Alphabetical order so "Thrasios + Tymna" ≡ "Tymna + Thrasios" in stats.
+ */
+export function combineCommanders(a: string, b?: string | null): string {
+  if (!b || normalizeQuery(a) === normalizeQuery(b)) return a;
+  return [a, b].sort((x, y) => x.localeCompare(y)).join(' + ');
+}
+
+/**
  * Resolve free-typed input to the canonical card name via Scryfall's fuzzy
  * lookup ("urza lord high" → "Urza, Lord High Artificer"), so commander stats
  * never split across casing/punctuation variants. Null when unrecognized.

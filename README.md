@@ -8,7 +8,7 @@ Tabletop Simulator. Serverless: Cloudflare Workers (HTTP interactions) + D1. $0/
 | Command | What it does |
 |---|---|
 | `/game start` | Start a game in this channel: @ the pod (2-6 players — 1v1 EDH works too), optional bracket. Live timer starts. |
-| `/commander` | Optionally log your commander for the game (Scryfall autocomplete). |
+| `/commander` | Optionally log your commander for the game (Scryfall autocomplete). Optional `partner` for two-commander decks — the pair is one deck identity in stats. |
 | `/game report` | Report placements (1st..Nth). Flags: `winner_only`, `draw`. Updates both ratings instantly. |
 | `/game cancel` | Abort the active game. |
 | `/undo` | Revert the most recent completed game (participants/admins). |
