@@ -1,0 +1,36 @@
+// Copy this file to `wrangler.jsonc`, then fill in your own values.
+// `wrangler.jsonc` is gitignored so your database ID never lands in a commit.
+//
+//   cp wrangler.example.jsonc wrangler.jsonc
+//
+// See README.md → Self-hosting for the full walkthrough.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Your Worker's name. This becomes part of its public URL
+  // (https://<name>.<your-subdomain>.workers.dev), which you paste into the
+  // Discord Developer Portal as the Interactions Endpoint URL.
+  "name": "mtg-edh-ladder-bot",
+
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+
+  // Streams logs to the Cloudflare dashboard. `npm run tail` also works.
+  "observability": { "enabled": true },
+
+  "d1_databases": [
+    {
+      // Leave this as "DB" — the code reads `env.DB`.
+      "binding": "DB",
+
+      // Must match the name you passed to `npx wrangler d1 create <name>`.
+      "database_name": "mtg-edh-ladder-bot",
+
+      // Printed by `npx wrangler d1 create`. Also visible in the Cloudflare
+      // dashboard under Storage & Databases → D1. Not a secret (it's useless
+      // without your Cloudflare credentials), but it is yours — keep it out
+      // of commits so nobody deploys against an ID they don't own.
+      "database_id": "PASTE_YOUR_DATABASE_ID_HERE"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# Copy this file to `.dev.vars`, then fill in your own values.
+#
+#   cp .dev.vars.example .dev.vars
+#
+# `.dev.vars` is gitignored. NEVER commit it — DISCORD_BOT_TOKEN is a live
+# credential that grants full control of your bot.
+#
+# These three values are only used by `npm run register`, the script that tells
+# Discord which slash commands exist. The deployed Worker itself does not read
+# them — its one secret (DISCORD_PUBLIC_KEY) is set separately with:
+#
+#   npx wrangler secret put DISCORD_PUBLIC_KEY
+#
+# All values come from https://discord.com/developers/applications
+
+# General Information → Application ID
+DISCORD_APP_ID=000000000000000000
+
+# Bot → Token → Reset Token. Shown exactly once; store it somewhere safe.
+DISCORD_BOT_TOKEN=your-bot-token-here
+
+# Your Discord server's ID. Enable Developer Mode in Discord
+# (Settings → Advanced), then right-click the server icon → Copy Server ID.
+# Commands are registered per-guild so they appear instantly instead of
+# taking up to an hour to propagate globally.
+GUILD_ID=000000000000000000
