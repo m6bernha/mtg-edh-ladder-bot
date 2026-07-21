@@ -6,6 +6,7 @@ import {
 } from '../db/queries';
 import { errorMessage, successMessage } from '../discord/embeds';
 import { invoker, opt } from '../discord/options';
+import { resolveCommander } from '../scryfall';
 import type { Env, Interaction, MessageData } from '../types';
 
 export async function handleCommander(i: Interaction, env: Env): Promise<MessageData> {
@@ -13,8 +14,11 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   const channelId = i.channel_id;
   if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
 
-  const name = (opt<string>(i.data?.options ?? [], 'name') ?? '').trim().slice(0, 100);
-  if (!name) return errorMessage('Give me a commander name.');
+  const raw = (opt<string>(i.data?.options ?? [], 'name') ?? '').trim().slice(0, 100);
+  if (!raw) return errorMessage('Give me a commander name.');
+  // Canonicalize via Scryfall so stats never split across spelling variants.
+  const canonical = await resolveCommander(raw);
+  const name = canonical ?? raw;
 
   let game = await getActiveGame(env.DB, guildId, channelId);
   let note = 'for the game in progress';
@@ -29,5 +33,6 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   if (!mine) return errorMessage("You're not in that game's pod.");
 
   await setCommander(env.DB, game.id, mine.player_id, name);
-  return successMessage(`🧙 **${name}** locked in ${note}.`);
+  const suffix = canonical ? '' : ' *(as typed — Scryfall didn\'t recognize it)*';
+  return successMessage(`🧙 **${name}** locked in ${note}.${suffix}`);
 }
