@@ -240,6 +240,7 @@ export function helpMessage(): MessageData {
           '`/game start` — start a game in this channel, @ the pod (2-6 players, 1v1 EDH included), optional bracket. A live timer starts.',
           '`/commander` — (optional) log your commander for the game, with autocomplete. Add `partner` for pairs (Partner, Backgrounds, Friends Forever).',
           '`/game report` — report placements when it ends: 1st, 2nd, 3rd… Flags: `winner_only`, `draw`.',
+          '`/game bracket` — set or fix the bracket mid-match (or on the last reported game).',
           '`/game cancel` — abort the game, nothing counts.',
           '`/undo` — revert the most recent completed game (participants/admins).',
           '',

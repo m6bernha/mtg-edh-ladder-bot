@@ -196,6 +196,10 @@ export async function undoGame(
   await db.batch(stmts);
 }
 
+export async function setBracket(db: D1Database, gameId: number, bracket: string): Promise<void> {
+  await db.prepare('UPDATE games SET bracket = ? WHERE id = ?').bind(bracket, gameId).run();
+}
+
 export async function setCommander(
   db: D1Database,
   gameId: number,

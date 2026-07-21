@@ -1,4 +1,9 @@
-import { handleGameCancel, handleGameReport, handleGameStart } from './commands/game';
+import {
+  handleGameBracket,
+  handleGameCancel,
+  handleGameReport,
+  handleGameStart,
+} from './commands/game';
 import { handleCommander } from './commands/commander';
 import { handleLeaderboard, handleStats, handleVs } from './commands/boards';
 import { handleUndo } from './commands/undo';
@@ -19,6 +24,7 @@ const INLINE: Record<string, CommandHandler> = {
 const DEFERRED: Record<string, CommandHandler> = {
   'game report': handleGameReport,
   'game cancel': handleGameCancel,
+  'game bracket': handleGameBracket,
   commander: handleCommander,
   leaderboard: handleLeaderboard,
   stats: handleStats,

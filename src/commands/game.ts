@@ -5,11 +5,19 @@ import {
   completeGame,
   createGame,
   getActiveGame,
+  getLatestCompletedGameInChannel,
   getRoster,
+  setBracket,
   upsertPlayers,
   type CompletionEntry,
 } from '../db/queries';
-import { errorMessage, gameStartMessage, reportMessage, successMessage } from '../discord/embeds';
+import {
+  bracketLabel,
+  errorMessage,
+  gameStartMessage,
+  reportMessage,
+  successMessage,
+} from '../discord/embeds';
 import { collectUsers, displayName, getSub, invoker, opt, resolvedUser } from '../discord/options';
 import { isAdmin, validateReport, validateStart, type PlacementInput } from '../validation';
 import type { Env, Interaction, MessageData } from '../types';
@@ -123,6 +131,35 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
     })),
     { duration: endedAt - active.started_at, bracket: active.bracket, draw, winnerOnly },
   );
+}
+
+export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {
+  const guildId = i.guild_id;
+  const channelId = i.channel_id;
+  if (!guildId || !channelId) return errorMessage('Run this in a server channel.');
+  const sub = getSub(i);
+  const bracket = sub ? opt<string>(sub.options, 'bracket') : undefined;
+  if (!bracket) return errorMessage('Pick a bracket.');
+
+  let game = await getActiveGame(env.DB, guildId, channelId);
+  let note = 'for the game in progress';
+  if (!game) {
+    game = await getLatestCompletedGameInChannel(env.DB, guildId, channelId);
+    if (game) note = `for the game that ended <t:${game.ended_at}:R>`;
+  }
+  if (!game) return errorMessage('No game found in this channel — start one with `/game start`.');
+
+  const roster = await getRoster(env.DB, game.id);
+  const me = invoker(i);
+  if (!roster.some((r) => r.discord_user_id === me.id) && !isAdmin(i.member?.permissions)) {
+    return errorMessage('Only players in that game (or admins) can set its bracket.');
+  }
+
+  const old = game.bracket;
+  await setBracket(env.DB, game.id, bracket);
+  const change =
+    old === bracket ? `stays **${bracketLabel(bracket)}**` : `**${bracketLabel(old)}** → **${bracketLabel(bracket)}**`;
+  return successMessage(`🎚️ Bracket ${change} ${note}.`);
 }
 
 export async function handleGameCancel(i: Interaction, env: Env): Promise<MessageData> {

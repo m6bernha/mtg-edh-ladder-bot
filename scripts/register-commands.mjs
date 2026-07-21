@@ -114,6 +114,12 @@ const commands = [
         name: 'cancel',
         description: 'Abort the active game — nothing is recorded',
       },
+      {
+        type: SUB,
+        name: 'bracket',
+        description: "Set or correct the game's bracket mid-match (or after reporting)",
+        options: [{ ...bracketOption, required: true }],
+      },
     ],
   },
   {
