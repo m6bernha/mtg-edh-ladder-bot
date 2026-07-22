@@ -1,5 +1,4 @@
-import { computeElo } from '../ratings/elo';
-import { computeTrueSkill, skillRating } from '../ratings/trueskill';
+import { computeTrueSkill } from '../ratings/trueskill';
 import {
   cancelGame,
   completeGame,
@@ -11,13 +10,9 @@ import {
   upsertPlayers,
   type CompletionEntry,
 } from '../db/queries';
-import {
-  bracketLabel,
-  errorMessage,
-  gameStartMessage,
-  reportMessage,
-  successMessage,
-} from '../discord/embeds';
+import { bracketLabel, errorMessage, successMessage } from '../discord/embeds';
+import { matchState, renderMatchCard } from '../discord/card';
+import { updateLiveCard } from '../discord/live-card';
 import {
   collectUsers,
   displayName,
@@ -34,7 +29,7 @@ import {
   validateStart,
   type PlacementInput,
 } from '../validation';
-import type { Env, Interaction, MessageData } from '../types';
+import type { Env, GameRow, Interaction, MessageData, RosterEntry } from '../types';
 
 const PLAYER_SLOTS = ['player1', 'player2', 'player3', 'player4', 'player5', 'player6'];
 const PLACE_SLOTS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'];
@@ -67,7 +62,7 @@ export async function handleGameStart(i: Interaction, env: Env): Promise<Message
     return { id, username: u ? displayName(u) : id };
   });
   const players = await upsertPlayers(env.DB, guildId, users);
-  const { startedAt } = await createGame(
+  const { gameId, startedAt } = await createGame(
     env.DB,
     guildId,
     channelId,
@@ -75,7 +70,43 @@ export async function handleGameStart(i: Interaction, env: Env): Promise<Message
     invoker(i).id,
     ids.map((id) => players.get(id)!.id),
   );
-  return gameStartMessage(ids, bracket, startedAt);
+
+  // Build the opening card from what we already have — no extra round trip. The
+  // active phase renders content pings + allowed_mentions, so the initial post
+  // notifies the pod. The router's after-hook captures this message's id.
+  const game: GameRow = {
+    id: gameId,
+    guild_id: guildId,
+    channel_id: channelId,
+    status: 'active',
+    bracket,
+    winner_only: 0,
+    draw: 0,
+    started_at: startedAt,
+    ended_at: null,
+    created_by: invoker(i).id,
+    reported_by: null,
+    message_id: null,
+  };
+  const roster: RosterEntry[] = ids.map((id) => {
+    const p = players.get(id)!;
+    return {
+      game_id: gameId,
+      player_id: p.id,
+      placement: null,
+      commander: null,
+      commander_image: null,
+      mu_before: null,
+      mu_after: null,
+      sigma_before: null,
+      sigma_after: null,
+      discord_user_id: id,
+      username: p.username,
+      ts_mu: p.ts_mu,
+      ts_sigma: p.ts_sigma,
+    };
+  });
+  return renderMatchCard(matchState(game, roster));
 }
 
 export async function handleGameReport(i: Interaction, env: Env): Promise<MessageData> {
@@ -109,11 +140,6 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   const byId = new Map(roster.map((r) => [r.discord_user_id, r]));
   const ordered = [...placements].sort((a, b) => a.place - b.place).map((p) => byId.get(p.userId)!);
   const places = ordered.map((_, idx) => idx + 1);
-  const newElos = computeElo(
-    ordered.map((r) => r.elo),
-    places,
-    { draw, winnerOnly },
-  );
   const newTs = computeTrueSkill(
     ordered.map((r) => ({ mu: r.ts_mu, sigma: r.ts_sigma })),
     places,
@@ -123,8 +149,6 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   const entries: CompletionEntry[] = ordered.map((r, idx) => ({
     playerId: r.player_id,
     placement: draw ? 1 : idx + 1, // a draw is everyone tied for 1st
-    eloBefore: r.elo,
-    eloAfter: newElos[idx],
     muBefore: r.ts_mu,
     muAfter: newTs[idx].mu,
     sigmaBefore: r.ts_sigma,
@@ -132,19 +156,19 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   }));
   const endedAt = await completeGame(env.DB, active.id, { winnerOnly, draw }, me.id, entries);
 
-  return reportMessage(
-    ordered.map((r, idx) => ({
-      userId: r.discord_user_id,
-      username: r.username,
-      placement: idx + 1,
-      eloBefore: r.elo,
-      eloAfter: newElos[idx],
-      srBefore: skillRating(r.ts_mu, r.ts_sigma),
-      srAfter: skillRating(newTs[idx].mu, newTs[idx].sigma),
-      commander: r.commander,
-    })),
-    { duration: endedAt - active.started_at, bracket: active.bracket, draw, winnerOnly },
-  );
+  // The completed roster (placements + rating snapshots) now lives in D1, so the
+  // card renders itself from a fresh read. Update it in place and confirm quietly.
+  const game: GameRow = {
+    ...active,
+    status: 'completed',
+    ended_at: endedAt,
+    winner_only: winnerOnly ? 1 : 0,
+    draw: draw ? 1 : 0,
+  };
+  const shown = await updateLiveCard(env, game);
+  return shown
+    ? successMessage('🏆 Result recorded — the pod card is updated.')
+    : renderMatchCard(matchState(game, await getRoster(env.DB, game.id)));
 }
 
 export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {
@@ -167,6 +191,7 @@ export async function handleGameBracket(i: Interaction, env: Env): Promise<Messa
 
   const old = game.bracket;
   await setBracket(env.DB, game.id, bracket);
+  await updateLiveCard(env, { ...game, bracket });
   const change =
     old === bracket ? `stays **${bracketLabel(bracket)}**` : `**${bracketLabel(old)}** → **${bracketLabel(bracket)}**`;
   return successMessage(`🎚️ Bracket ${change} ${note}.`);
@@ -188,6 +213,7 @@ export async function handleGameCancel(i: Interaction, env: Env): Promise<Messag
   if (!cancelled) {
     return errorMessage('That game was already reported or cancelled — nothing to do.');
   }
+  await updateLiveCard(env, { ...active, status: 'cancelled', ended_at: Math.floor(Date.now() / 1000) });
   return successMessage(
     `🗑️ Game cancelled (was running <t:${active.started_at}:R>). Nothing counts — start fresh with \`/game start\`.`,
   );

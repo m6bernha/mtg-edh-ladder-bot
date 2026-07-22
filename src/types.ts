@@ -1,6 +1,9 @@
 export interface Env {
   DB: D1Database;
   DISCORD_PUBLIC_KEY: string;
+  // Bot token, used to edit a game's live card after the 15-minute interaction
+  // token has expired. `wrangler secret put DISCORD_BOT_TOKEN`.
+  DISCORD_BOT_TOKEN: string;
 }
 
 // ---- Discord interaction payload (minimal, hand-rolled) ----
@@ -18,6 +21,9 @@ export const ResponseType = {
   DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5,
   APPLICATION_COMMAND_AUTOCOMPLETE_RESULT: 8,
 } as const;
+
+/** Message flag: only the invoking user sees the reply. */
+export const EPHEMERAL = 64;
 
 export interface DiscordUser {
   id: string;
@@ -55,6 +61,9 @@ export interface Embed {
   description?: string;
   color?: number;
   fields?: { name: string; value: string; inline?: boolean }[];
+  author?: { name: string; icon_url?: string };
+  thumbnail?: { url: string };
+  image?: { url: string };
   footer?: { text: string };
   timestamp?: string;
 }
@@ -64,6 +73,7 @@ export interface MessageData {
   content?: string;
   embeds?: Embed[];
   allowed_mentions?: { users?: string[]; parse?: string[] };
+  flags?: number; // EPHEMERAL to hide from everyone but the invoker
 }
 
 // ---- Database rows ----
@@ -73,7 +83,6 @@ export interface PlayerRow {
   guild_id: string;
   discord_user_id: string;
   username: string;
-  elo: number;
   ts_mu: number;
   ts_sigma: number;
 }
@@ -90,6 +99,7 @@ export interface GameRow {
   ended_at: number | null;
   created_by: string;
   reported_by: string | null;
+  message_id: string | null;
 }
 
 export interface GamePlayerRow {
@@ -97,8 +107,7 @@ export interface GamePlayerRow {
   player_id: number;
   placement: number | null;
   commander: string | null;
-  elo_before: number | null;
-  elo_after: number | null;
+  commander_image: string | null;
   mu_before: number | null;
   mu_after: number | null;
   sigma_before: number | null;
@@ -109,7 +118,6 @@ export interface GamePlayerRow {
 export interface RosterEntry extends GamePlayerRow {
   discord_user_id: string;
   username: string;
-  elo: number;
   ts_mu: number;
   ts_sigma: number;
 }

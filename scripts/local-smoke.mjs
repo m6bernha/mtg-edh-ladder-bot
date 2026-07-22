@@ -108,10 +108,10 @@ const startPayload = {
 {
   const r = await post(startPayload);
   check(
-    '/game start → embed + pings',
+    '/game start → live card + pings',
     r.status === 200 &&
       r.json.type === 4 &&
-      r.json.data?.embeds?.[0]?.title?.includes('pod started') &&
+      r.json.data?.embeds?.[0]?.title?.includes('in progress') &&
       r.json.data?.content?.includes('<@u2>'),
     r,
   );

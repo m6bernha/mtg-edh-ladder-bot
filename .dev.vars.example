@@ -5,11 +5,17 @@
 # `.dev.vars` is gitignored. NEVER commit it — DISCORD_BOT_TOKEN is a live
 # credential that grants full control of your bot.
 #
-# These three values are only used by `npm run register`, the script that tells
-# Discord which slash commands exist. The deployed Worker itself does not read
-# them — its one secret (DISCORD_PUBLIC_KEY) is set separately with:
+# These three values are used by `npm run register`, the script that tells
+# Discord which slash commands exist.
 #
-#   npx wrangler secret put DISCORD_PUBLIC_KEY
+# The deployed Worker needs TWO secrets, set separately (never from this file):
+#
+#   npx wrangler secret put DISCORD_PUBLIC_KEY   # verifies inbound requests
+#   npx wrangler secret put DISCORD_BOT_TOKEN    # edits each game's live card
+#
+# DISCORD_BOT_TOKEN is both a `register` input AND a deployed-Worker secret: the
+# Worker edits the live match card via the bot token long after the 15-minute
+# interaction token has expired.
 #
 # All values come from https://discord.com/developers/applications
 

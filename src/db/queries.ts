@@ -50,7 +50,10 @@ export async function upsertPlayers(
   );
   const placeholders = users.map(() => '?').join(',');
   const { results } = await db
-    .prepare(`SELECT * FROM players WHERE guild_id = ? AND discord_user_id IN (${placeholders})`)
+    .prepare(
+      `SELECT id, guild_id, discord_user_id, username, ts_mu, ts_sigma
+       FROM players WHERE guild_id = ? AND discord_user_id IN (${placeholders})`,
+    )
     .bind(guildId, ...users.map((u) => u.id))
     .all<PlayerRow>();
   return new Map(results.map((r) => [r.discord_user_id, r]));
@@ -108,7 +111,7 @@ export async function getLatestCompletedGame(
 export async function getRoster(db: D1Database, gameId: number): Promise<RosterEntry[]> {
   const { results } = await db
     .prepare(
-      `SELECT gp.*, p.discord_user_id, p.username, p.elo, p.ts_mu, p.ts_sigma
+      `SELECT gp.*, p.discord_user_id, p.username, p.ts_mu, p.ts_sigma
        FROM game_players gp JOIN players p ON p.id = gp.player_id
        WHERE gp.game_id = ?`,
     )
@@ -146,8 +149,6 @@ export async function createGame(
 export interface CompletionEntry {
   playerId: number;
   placement: number;
-  eloBefore: number;
-  eloAfter: number;
   muBefore: number;
   muAfter: number;
   sigmaBefore: number;
@@ -175,14 +176,12 @@ export async function completeGame(
     stmts.push(
       db
         .prepare(
-          `UPDATE game_players SET placement = ?, elo_before = ?, elo_after = ?,
+          `UPDATE game_players SET placement = ?,
              mu_before = ?, mu_after = ?, sigma_before = ?, sigma_after = ?
            WHERE game_id = ? AND player_id = ?`,
         )
         .bind(
           e.placement,
-          e.eloBefore,
-          e.eloAfter,
           e.muBefore,
           e.muAfter,
           e.sigmaBefore,
@@ -191,8 +190,8 @@ export async function completeGame(
           e.playerId,
         ),
       db
-        .prepare('UPDATE players SET elo = ?, ts_mu = ?, ts_sigma = ? WHERE id = ?')
-        .bind(e.eloAfter, e.muAfter, e.sigmaAfter, e.playerId),
+        .prepare('UPDATE players SET ts_mu = ?, ts_sigma = ? WHERE id = ?')
+        .bind(e.muAfter, e.sigmaAfter, e.playerId),
     );
   }
   await db.batch(stmts);
@@ -226,8 +225,8 @@ export async function undoGame(
   for (const r of restores) {
     stmts.push(
       db
-        .prepare('UPDATE players SET elo = ?, ts_mu = ?, ts_sigma = ? WHERE id = ?')
-        .bind(r.elo, r.mu, r.sigma, r.playerId),
+        .prepare('UPDATE players SET ts_mu = ?, ts_sigma = ? WHERE id = ?')
+        .bind(r.mu, r.sigma, r.playerId),
     );
   }
   await db.batch(stmts);
@@ -241,15 +240,31 @@ export async function setBracket(db: D1Database, gameId: number, bracket: string
   assertWrote(res, 'setting the bracket');
 }
 
+/** Stamp the live card's message id, learned after /game start posts it. */
+export async function setGameMessageId(
+  db: D1Database,
+  gameId: number,
+  messageId: string,
+): Promise<void> {
+  const res = await db
+    .prepare('UPDATE games SET message_id = ? WHERE id = ?')
+    .bind(messageId, gameId)
+    .run();
+  assertWrote(res, 'storing the card message id');
+}
+
 export async function setCommander(
   db: D1Database,
   gameId: number,
   playerId: number,
   commander: string,
+  image: string | null,
 ): Promise<void> {
   const res = await db
-    .prepare('UPDATE game_players SET commander = ? WHERE game_id = ? AND player_id = ?')
-    .bind(commander, gameId, playerId)
+    .prepare(
+      'UPDATE game_players SET commander = ?, commander_image = ? WHERE game_id = ? AND player_id = ?',
+    )
+    .bind(commander, image, gameId, playerId)
     .run();
   assertWrote(res, 'setting the commander');
 }
@@ -289,8 +304,10 @@ export interface PlayerGameRow {
   bracket: string;
   placement: number;
   commander: string | null;
-  elo_before: number;
-  elo_after: number;
+  mu_before: number;
+  mu_after: number;
+  sigma_before: number;
+  sigma_after: number;
 }
 
 /** Every completed game for one player, newest first — feeds all of /stats. */
@@ -298,7 +315,8 @@ export async function getPlayerGames(db: D1Database, playerId: number): Promise<
   const { results } = await db
     .prepare(
       `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket,
-              gp.placement, gp.commander, gp.elo_before, gp.elo_after
+              gp.placement, gp.commander,
+              gp.mu_before, gp.mu_after, gp.sigma_before, gp.sigma_after
        FROM game_players gp JOIN games g ON g.id = gp.game_id
        WHERE gp.player_id = ? AND g.status = 'completed'
        ORDER BY g.ended_at DESC, g.id DESC`,
