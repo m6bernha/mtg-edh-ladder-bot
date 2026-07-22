@@ -12,7 +12,7 @@ import {
 } from '../db/queries';
 import { bracketLabel, errorMessage, successMessage } from '../discord/embeds';
 import { matchState, renderMatchCard } from '../discord/card';
-import { updateLiveCard } from '../discord/live-card';
+import { CARD_PERM_HINT, updateLiveCard } from '../discord/live-card';
 import {
   collectUsers,
   displayName,
@@ -166,9 +166,14 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
     draw: draw ? 1 : 0,
   };
   const shown = await updateLiveCard(env, game);
+  // If the card can't be reached, still show the reporter the full result
+  // (ephemerally) plus the reason the channel didn't get the update.
   return shown
     ? successMessage('🏆 Result recorded — the pod card is updated.')
-    : renderMatchCard(matchState(game, await getRoster(env.DB, game.id)));
+    : {
+        ...renderMatchCard(matchState(game, await getRoster(env.DB, game.id))),
+        content: CARD_PERM_HINT.trim(),
+      };
 }
 
 export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {
@@ -191,10 +196,10 @@ export async function handleGameBracket(i: Interaction, env: Env): Promise<Messa
 
   const old = game.bracket;
   await setBracket(env.DB, game.id, bracket);
-  await updateLiveCard(env, { ...game, bracket });
+  const shown = await updateLiveCard(env, { ...game, bracket });
   const change =
     old === bracket ? `stays **${bracketLabel(bracket)}**` : `**${bracketLabel(old)}** → **${bracketLabel(bracket)}**`;
-  return successMessage(`🎚️ Bracket ${change} ${note}.`);
+  return successMessage(`🎚️ Bracket ${change} ${note}.${shown ? '' : CARD_PERM_HINT}`);
 }
 
 export async function handleGameCancel(i: Interaction, env: Env): Promise<MessageData> {
@@ -213,8 +218,13 @@ export async function handleGameCancel(i: Interaction, env: Env): Promise<Messag
   if (!cancelled) {
     return errorMessage('That game was already reported or cancelled — nothing to do.');
   }
-  await updateLiveCard(env, { ...active, status: 'cancelled', ended_at: Math.floor(Date.now() / 1000) });
+  const shown = await updateLiveCard(env, {
+    ...active,
+    status: 'cancelled',
+    ended_at: Math.floor(Date.now() / 1000),
+  });
   return successMessage(
-    `🗑️ Game cancelled (was running <t:${active.started_at}:R>). Nothing counts — start fresh with \`/game start\`.`,
+    `🗑️ Game cancelled (was running <t:${active.started_at}:R>). Nothing counts — start fresh with \`/game start\`.` +
+      (shown ? '' : CARD_PERM_HINT),
   );
 }
