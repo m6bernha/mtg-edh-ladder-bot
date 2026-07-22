@@ -45,13 +45,14 @@ const COMMANDS: Record<string, CommandSpec> = {
   'game start': { handler: handleGameStart, mode: 'inline', after: captureStartMessageId },
   help: { handler: async () => helpMessage(), mode: 'inline', ephemeral: true },
 
-  // The live card carries the news, so these confirm quietly to the invoker.
-  'game report': { handler: handleGameReport, mode: 'deferred', ephemeral: true },
+  // Private tweaks to the live card — the shared card shows the change, so the
+  // reply just confirms to whoever ran the command.
   'game cancel': { handler: handleGameCancel, mode: 'deferred', ephemeral: true },
   'game bracket': { handler: handleGameBracket, mode: 'deferred', ephemeral: true },
   commander: { handler: handleCommander, mode: 'deferred', ephemeral: true },
 
-  // Shared readouts, meant for the whole channel.
+  // Public results and shared readouts — the whole channel sees these.
+  'game report': { handler: handleGameReport, mode: 'deferred' },
   leaderboard: { handler: handleLeaderboard, mode: 'deferred' },
   stats: { handler: handleStats, mode: 'deferred' },
   vs: { handler: handleVs, mode: 'deferred' },

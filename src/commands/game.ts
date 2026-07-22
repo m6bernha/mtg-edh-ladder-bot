@@ -156,8 +156,6 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   }));
   const endedAt = await completeGame(env.DB, active.id, { winnerOnly, draw }, me.id, entries);
 
-  // The completed roster (placements + rating snapshots) now lives in D1, so the
-  // card renders itself from a fresh read. Update it in place and confirm quietly.
   const game: GameRow = {
     ...active,
     status: 'completed',
@@ -165,15 +163,20 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
     winner_only: winnerOnly ? 1 : 0,
     draw: draw ? 1 : 0,
   };
-  const shown = await updateLiveCard(env, game);
-  // If the card can't be reached, still show the reporter the full result
-  // (ephemerally) plus the reason the channel didn't get the update.
-  return shown
-    ? successMessage('🏆 Result recorded — the pod card is updated.')
-    : {
-        ...renderMatchCard(matchState(game, await getRoster(env.DB, game.id))),
-        content: CARD_PERM_HINT.trim(),
-      };
+  const finalRoster: RosterEntry[] = ordered.map((r, idx) => ({
+    ...r,
+    placement: draw ? 1 : idx + 1,
+    mu_before: r.ts_mu,
+    sigma_before: r.ts_sigma,
+    mu_after: newTs[idx].mu,
+    sigma_after: newTs[idx].sigma,
+  }));
+  // Best-effort: edit the original card to completed so its live timer stops and
+  // it reflects the result up-thread (needs channel perms). The result itself is
+  // this command's PUBLIC reply — an interaction response, so the whole pod sees
+  // it even when the bot can't edit the original card.
+  await updateLiveCard(env, game);
+  return renderMatchCard(matchState(game, finalRoster));
 }
 
 export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {
