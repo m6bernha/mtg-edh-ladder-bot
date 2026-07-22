@@ -146,6 +146,14 @@ reposts a fresh card and relinks it, so the game self-heals rather than erroring
 a follow-up's own reply is ephemeral, the caller always gets a confirmation even if the
 shared card cannot be reached.
 
+**Every Discord API call must send a `DiscordBot (...)` User-Agent.** Discord sits behind
+Cloudflare, whose WAF silently rejects bot-authenticated REST calls without one — as bare
+`403`s that are indistinguishable from permission errors. This cost a full debugging session
+that toured channel overrides, roles and a bot re-invite before the real culprit surfaced:
+the same request that 403'd from a client with no UA returned `200` with one. If a Discord
+call fails with 403 and the permissions look right, check the User-Agent before touching
+the server settings. `src/discord/api.ts` centralises the header for exactly this reason.
+
 ## Rating
 
 One rating, deliberately.

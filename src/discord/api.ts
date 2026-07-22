@@ -2,6 +2,14 @@ import type { MessageData } from '../types';
 
 const API = 'https://discord.com/api/v10';
 
+// Discord sits behind Cloudflare, and its WAF silently rejects bot-authenticated
+// REST calls that lack a proper `DiscordBot (...)` User-Agent — as bare 403s that
+// look exactly like permission errors. Every Discord API fetch must send this.
+// (Cost of learning this: one very long debugging night. See ARCHITECTURE.md.)
+const USER_AGENT = 'DiscordBot (https://github.com/m6bernha/mtg-edh-ladder-bot, 1.0)';
+
+const JSON_HEADERS = { 'content-type': 'application/json', 'User-Agent': USER_AGENT };
+
 export function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), {
     status,
@@ -17,7 +25,7 @@ export async function patchOriginal(
 ): Promise<void> {
   const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: JSON_HEADERS,
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -35,7 +43,9 @@ export async function fetchOriginalMessageId(
   applicationId: string,
   token: string,
 ): Promise<string | null> {
-  const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`);
+  const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`, {
+    headers: { 'User-Agent': USER_AGENT },
+  });
   if (!res.ok) {
     console.error(`fetchOriginalMessageId failed: ${res.status} ${await res.text()}`);
     return null;
@@ -59,7 +69,7 @@ export async function editMessage(
   try {
     const res = await fetch(`${API}/channels/${channelId}/messages/${messageId}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json', Authorization: `Bot ${botToken}` },
+      headers: { ...JSON_HEADERS, Authorization: `Bot ${botToken}` },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
@@ -85,7 +95,7 @@ export async function createMessage(
   try {
     const res = await fetch(`${API}/channels/${channelId}/messages`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', Authorization: `Bot ${botToken}` },
+      headers: { ...JSON_HEADERS, Authorization: `Bot ${botToken}` },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
