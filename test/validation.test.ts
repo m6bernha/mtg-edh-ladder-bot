@@ -77,13 +77,12 @@ describe('isPlayerOrAdmin', () => {
 });
 
 describe('restoreFromSnapshots', () => {
-  const row = (playerId: number, elo: number, mu: number, sigma: number): GamePlayerRow => ({
+  const row = (playerId: number, mu: number, sigma: number): GamePlayerRow => ({
     game_id: 1,
     player_id: playerId,
     placement: 1,
     commander: null,
-    elo_before: elo,
-    elo_after: elo + 10,
+    commander_image: null,
     mu_before: mu,
     mu_after: mu + 1,
     sigma_before: sigma,
@@ -91,15 +90,15 @@ describe('restoreFromSnapshots', () => {
   });
 
   it('returns the pre-game values for every player', () => {
-    const updates = restoreFromSnapshots([row(1, 1000, 25, 8.33), row(2, 1030, 26.1, 7.9)]);
+    const updates = restoreFromSnapshots([row(1, 25, 8.33), row(2, 26.1, 7.9)]);
     expect(updates).toEqual([
-      { playerId: 1, elo: 1000, mu: 25, sigma: 8.33 },
-      { playerId: 2, elo: 1030, mu: 26.1, sigma: 7.9 },
+      { playerId: 1, mu: 25, sigma: 8.33 },
+      { playerId: 2, mu: 26.1, sigma: 7.9 },
     ]);
   });
 
   it('throws when snapshots are missing', () => {
-    const bad = { ...row(1, 1000, 25, 8.33), elo_before: null };
+    const bad = { ...row(1, 25, 8.33), mu_before: null };
     expect(() => restoreFromSnapshots([bad])).toThrow();
   });
 });

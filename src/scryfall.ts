@@ -86,12 +86,41 @@ export function combineCommanders(a: string, b?: string | null): string {
   return [a, b].sort((x, y) => x.localeCompare(y)).join(' + ');
 }
 
+interface ScryfallImageUris {
+  art_crop?: string;
+  small?: string;
+}
+interface ScryfallCard {
+  name?: string;
+  image_uris?: ScryfallImageUris;
+  card_faces?: { image_uris?: ScryfallImageUris }[];
+}
+
 /**
- * Resolve free-typed input to the canonical card name via Scryfall's fuzzy
- * lookup ("urza lord high" → "Urza, Lord High Artificer"), so commander stats
- * never split across casing/punctuation variants. Null when unrecognized.
+ * Pull an art URL from a Scryfall card payload. Prefers `art_crop` (framed art,
+ * ideal as an embed thumbnail); for double-faced commanders the top-level
+ * `image_uris` is absent, so fall back to the front face; then to `small`.
+ * Null when the payload carries no usable image — art is decorative and must
+ * never block logging a deck.
  */
-export async function resolveCommander(name: string): Promise<string | null> {
+export function extractArt(card: unknown): string | null {
+  if (typeof card !== 'object' || card === null) return null;
+  const c = card as ScryfallCard;
+  const face = c.image_uris ?? c.card_faces?.[0]?.image_uris;
+  return face?.art_crop ?? face?.small ?? null;
+}
+
+export interface ResolvedCommander {
+  name: string;
+  art: string | null;
+}
+
+/**
+ * Resolve free-typed input to the canonical card name (and art) via Scryfall's
+ * fuzzy lookup ("urza lord high" → "Urza, Lord High Artificer"), so commander
+ * stats never split across casing/punctuation variants. Null when unrecognized.
+ */
+export async function resolveCommander(name: string): Promise<ResolvedCommander | null> {
   const q = normalizeQuery(name);
   if (q.length < 2) return null;
   const url =
@@ -107,8 +136,9 @@ export async function resolveCommander(name: string): Promise<string | null> {
       },
     });
     if (!res.ok) return null; // 404 = no/ambiguous match
-    const card = (await res.json()) as { name?: string };
-    return card.name?.slice(0, MAX_NAME_CHARS) ?? null;
+    const card = (await res.json()) as ScryfallCard;
+    if (!card.name) return null;
+    return { name: card.name.slice(0, MAX_NAME_CHARS), art: extractArt(card) };
   } catch (e) {
     // Falls back to storing the name exactly as typed, so a Scryfall outage
     // never blocks logging a deck.

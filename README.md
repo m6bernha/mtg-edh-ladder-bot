@@ -4,9 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A competitive ranked ladder for Magic: The Gathering **Commander/EDH** pods, run entirely
-from Discord slash commands. Start a pod, report placements, and every player's rating
-updates instantly — with a FaceIt-style SR number, per-commander stats, head-to-head
-records, and an exact undo.
+from Discord slash commands. Start a pod and it posts **one live match card** that updates
+itself as you log commanders, set the bracket, and report the result — no channel spam.
+Every player's rating updates instantly, with an Xbox-Live-style SR number, per-commander
+stats and artwork, head-to-head records, and an exact undo.
 
 Built as a single [Cloudflare Worker](https://developers.cloudflare.com/workers/) backed
 by [D1](https://developers.cloudflare.com/d1/). No server to run, no container to keep
@@ -27,8 +28,8 @@ it in a spreadsheet means somebody has to maintain the spreadsheet.
 This runs the ladder where the games are already being discussed, and rates pods properly:
 
 - **TrueSkill** handles free-for-all pods natively and models *uncertainty*, so a new
-  player converges quickly instead of grinding through provisional games.
-- **Pairwise Elo** runs alongside it as a familiar, legible second number.
+  player converges quickly instead of grinding through provisional games. It's the same
+  family of system Xbox Live uses to match players — one number, **SR**, does the ranking.
 - Everything derivable — win rate, streaks, form, placement spread — is computed from game
   history rather than stored, so no counter can drift out of sync with reality.
 
@@ -41,16 +42,21 @@ The design decisions behind all of this are written up in
 
 | Command | What it does |
 |---|---|
-| `/game start` | Start a game in this channel: `@` the pod (2–6 players — 1v1 works too), optional bracket. A live timer begins. |
-| `/commander` | Log your commander for the game, with Scryfall autocomplete. Optional `partner` for Partner / Background / Friends Forever decks — the pair is stored as one deck identity. |
-| `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Both ratings update immediately. |
+| `/game start` | Start a game in this channel: `@` the pod (2–6 players — 1v1 works too), optional bracket. Posts the live match card; a relative timer ticks on it. |
+| `/commander` | Log your commander for the game, with Scryfall autocomplete — its art appears on the card. Optional `partner` for Partner / Background / Friends Forever decks, stored as one deck identity. Confirms only to you. |
+| `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Updates the card with SR deltas; confirms only to you. |
 | `/game bracket` | Set or correct the game's bracket mid-match, or after reporting. |
 | `/game cancel` | Abort the active game. Nothing is recorded. |
 | `/undo` | Revert the most recent completed game and restore every player's exact prior rating. Participants and admins only. |
-| `/leaderboard` | All-time ladder: SR, Elo, W–L, win %. |
-| `/stats` | Player profile: ratings, placement spread, current streak, recent form, commanders. |
+| `/leaderboard` | All-time ladder: SR, W–L, win %. |
+| `/stats` | Player profile: SR, placement spread, current streak, recent form, commanders. |
 | `/vs` | Head-to-head between two players. |
 | `/help` | In-Discord cheatsheet. |
+
+The **live match card** is the centrepiece: `/game start` posts one message, and
+`/commander`, `/game bracket`, `/game report` and `/game cancel` all edit that same message
+instead of posting new ones. Follow-up commands reply to you privately (ephemerally) — the
+card carries the news for the channel.
 
 ### Ratings, briefly
 
@@ -62,8 +68,8 @@ SR = round((μ − 3σ) × 40 + 500)
 
 A fresh player (μ 25, σ 8.33) starts near 500. Early games move SR quickly because the
 system is resolving *uncertainty* (σ shrinking), not because the player improved — this is
-expected and settles down. **Elo** is classic pairwise multiplayer Elo starting at 1000,
-shown alongside as a familiar reference.
+expected and settles down. Beating a stronger pod moves SR more than beating a weaker one.
+SR is the only rating; there is no second number to reconcile.
 
 Brackets follow the official Commander bracket system (Open, 1 Exhibition → 5 cEDH) and are
 recorded per game.
@@ -119,14 +125,17 @@ Go to the [Discord Developer Portal](https://discord.com/developers/applications
 | **Public Key** | General Information |
 | **Bot Token** | Bot → Reset Token. Shown **once** — copy it immediately. |
 
-The Public Key is what the Worker uses to prove requests genuinely came from Discord. Give
-it to Cloudflare as a secret:
+The Worker needs **two** secrets. The Public Key proves requests genuinely came from
+Discord; the Bot Token lets the Worker edit each game's live card long after Discord's
+15-minute interaction window has closed. Set both:
 
 ```bash
 npx wrangler secret put DISCORD_PUBLIC_KEY
+npx wrangler secret put DISCORD_BOT_TOKEN
 ```
 
-Paste the Public Key when prompted. This is the only secret the Worker itself needs.
+Paste the matching value when prompted for each. (The Bot Token is used in two places — here
+as a Worker secret, and locally by the command-registration script in step 5.)
 
 ### 4. Deploy
 
@@ -166,10 +175,25 @@ reads it.
 ### 6. Invite the bot
 
 In the Developer Portal under **OAuth2 → URL Generator**, tick the scopes
-`applications.commands` and `bot`, leave bot permissions at zero, then open the generated
-URL and add it to your server.
+`applications.commands` and `bot`. Under **Bot Permissions**, tick **View Channels** and
+**Send Messages** — the bot needs them to post and edit the live match card in your pod
+channels. Open the generated URL and add it to your server.
 
 Type `/help` in any channel to confirm it's alive.
+
+### Upgrading an existing deployment
+
+A brand-new install applies `schema.sql` (step 2) and is already up to date. If you have an
+earlier deployment with game data, apply the migrations in `migrations/` in order instead —
+back up first, since dropping the old Elo columns is irreversible:
+
+```bash
+npx wrangler d1 export mtg-edh-ladder-bot --remote --output=backup.sql
+npx wrangler d1 execute mtg-edh-ladder-bot --remote --file migrations/0001_live_card.sql
+npx wrangler d1 execute mtg-edh-ladder-bot --remote --file migrations/0002_drop_elo.sql
+```
+
+Then set the new `DISCORD_BOT_TOKEN` secret (step 3) and redeploy.
 
 ---
 
@@ -209,17 +233,19 @@ reporting, Scryfall autocomplete, and `/help`.
 ```
 src/
   index.ts          Worker entry: signature verification, payload parsing, dispatch
-  router.ts         Command routing — the inline vs deferred split
+  router.ts         Command registry — the inline/deferred + ephemeral split
   types.ts          Discord payload and database row types
   validation.ts     Pure validation and permission predicates (no I/O)
-  scryfall.ts       Commander autocomplete and canonicalisation, cached
+  scryfall.ts       Commander autocomplete, canonicalisation, and art, cached
   commands/         One module per command surface
   db/               D1 queries and rating snapshot handling
-  ratings/          TrueSkill and pairwise Elo
-  discord/          Payload parsing, API calls, embed formatting
+  ratings/          TrueSkill (SR)
+  discord/          API calls, embeds, and the live match card (card.ts, live-card.ts)
 test/               Vitest unit tests
 scripts/            Command registration and signed end-to-end smoke tests
-schema.sql          Database schema
+schema.sql          Database schema (post-migration shape, for fresh installs)
+migrations/         Ordered ALTER migrations for existing deployments
+assets/             Bot avatar
 ```
 
 ---

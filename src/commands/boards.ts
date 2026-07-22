@@ -2,6 +2,7 @@ import { getLeaderboard, getPlayerByDiscordId, getPlayerGames, getSharedGames } 
 import { skillRating } from '../ratings/trueskill';
 import {
   errorMessage,
+  infoMessage,
   leaderboardMessage,
   statsMessage,
   vsMessage,
@@ -10,7 +11,7 @@ import {
 import { displayName, invoker, optString, requireGuild, resolvedUser } from '../discord/options';
 import type { Env, Interaction, MessageData } from '../types';
 
-/** How many recent games feed the form string and the Elo trend on /stats. */
+/** How many recent games feed the form string and the SR trend on /stats. */
 const RECENT_FORM_GAMES = 5;
 
 /** A commander needs this many games before it can be called someone's "best". */
@@ -21,7 +22,7 @@ export async function handleLeaderboard(i: Interaction, env: Env): Promise<Messa
   if (!ctx.ok) return errorMessage(ctx.error);
   const rows = await getLeaderboard(env.DB, ctx.guildId);
   if (rows.length === 0) {
-    return errorMessage('No completed games yet — the ladder starts with your first `/game start`.');
+    return infoMessage('The ladder is empty — the first `/game start` opens it.');
   }
   return leaderboardMessage(rows);
 }
@@ -58,9 +59,12 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
   }
   const recent = games.slice(0, RECENT_FORM_GAMES);
   const form = recent.map(result).reverse(); // oldest→newest
-  const eloTrendRecent = Math.round(
-    recent.reduce((acc, g) => acc + (g.elo_after - g.elo_before), 0),
-  );
+  const srTrendRecent = recent.reduce((acc, g) => {
+    if (g.mu_after == null || g.sigma_after == null || g.mu_before == null || g.sigma_before == null) {
+      return acc;
+    }
+    return acc + (skillRating(g.mu_after, g.sigma_after) - skillRating(g.mu_before, g.sigma_before));
+  }, 0);
 
   const byCommander = new Map<string, { games: number; wins: number }>();
   for (const g of games) {
@@ -86,7 +90,6 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
     sr: skillRating(player.ts_mu, player.ts_sigma),
     mu: player.ts_mu,
     sigma: player.ts_sigma,
-    elo: player.elo,
     wins,
     losses,
     draws,
@@ -97,7 +100,7 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
       games.reduce((acc, g) => acc + (g.ended_at - g.started_at), 0) / games.length,
     streak: `${first}${streakLen}`,
     form,
-    eloTrendRecent,
+    srTrendRecent,
     mostPlayed,
     best,
   };

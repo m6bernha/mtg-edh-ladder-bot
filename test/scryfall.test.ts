@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { combineCommanders, normalizeQuery } from '../src/scryfall';
+import { combineCommanders, extractArt, normalizeQuery } from '../src/scryfall';
 
 describe('combineCommanders', () => {
   it('single commander passes through', () => {
@@ -16,6 +16,40 @@ describe('combineCommanders', () => {
   });
   it('duplicate partner collapses to one', () => {
     expect(combineCommanders('Tymna the Weaver', 'tymna, the weaver')).toBe('Tymna the Weaver');
+  });
+});
+
+describe('extractArt', () => {
+  it('prefers art_crop from a single-faced card', () => {
+    const card = {
+      name: 'Atraxa, Praetors\' Voice',
+      image_uris: { art_crop: 'https://img/atraxa-crop', small: 'https://img/atraxa-small' },
+    };
+    expect(extractArt(card)).toBe('https://img/atraxa-crop');
+  });
+
+  it('falls back to the front face for double-faced commanders', () => {
+    const dfc = {
+      name: 'Kellan, the Fae-Blooded // Birthright Boon',
+      card_faces: [
+        { image_uris: { art_crop: 'https://img/kellan-front-crop' } },
+        { image_uris: { art_crop: 'https://img/kellan-back-crop' } },
+      ],
+    };
+    expect(extractArt(dfc)).toBe('https://img/kellan-front-crop');
+  });
+
+  it('falls back to small when art_crop is absent', () => {
+    expect(extractArt({ image_uris: { small: 'https://img/small-only' } })).toBe(
+      'https://img/small-only',
+    );
+  });
+
+  it('returns null for art-less or malformed payloads', () => {
+    expect(extractArt({ name: 'No Images' })).toBeNull();
+    expect(extractArt(null)).toBeNull();
+    expect(extractArt('not a card')).toBeNull();
+    expect(extractArt({ card_faces: [] })).toBeNull();
   });
 });
 

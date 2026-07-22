@@ -1,5 +1,6 @@
 import { getActiveOrLatestGame, getRoster, setCommander } from '../db/queries';
 import { errorMessage, successMessage } from '../discord/embeds';
+import { updateLiveCard } from '../discord/live-card';
 import { invoker, optString, requireGuildChannel } from '../discord/options';
 import { combineCommanders, resolveCommander } from '../scryfall';
 import type { Env, Interaction, MessageData } from '../types';
@@ -19,7 +20,14 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
     rawPartner ? resolveCommander(rawPartner) : Promise.resolve(null),
   ]);
   const unrecognized = !canonical || (!!rawPartner && !canonicalPartner);
-  const name = combineCommanders(canonical ?? raw, rawPartner ? (canonicalPartner ?? rawPartner) : null);
+  const primaryName = canonical?.name ?? raw;
+  const partnerName = rawPartner ? (canonicalPartner?.name ?? rawPartner) : null;
+  const name = combineCommanders(primaryName, partnerName);
+
+  // Show the art of whichever card's name leads the combined identity, so the
+  // thumbnail matches the name displayed first.
+  const leadIsPrimary = !partnerName || name.startsWith(primaryName);
+  const art = (leadIsPrimary ? canonical?.art : canonicalPartner?.art) ?? canonical?.art ?? null;
 
   const found = await getActiveOrLatestGame(env.DB, guildId, channelId);
   if (!found) return errorMessage('No game found in this channel — start one with `/game start`.');
@@ -31,7 +39,8 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   const mine = roster.find((r) => r.discord_user_id === invoker(i).id);
   if (!mine) return errorMessage("You're not in that game's pod.");
 
-  await setCommander(env.DB, game.id, mine.player_id, name);
-  const suffix = unrecognized ? ' *(part stored as typed — Scryfall didn\'t recognize it)*' : '';
+  await setCommander(env.DB, game.id, mine.player_id, name, art);
+  await updateLiveCard(env, game);
+  const suffix = unrecognized ? ' *(stored as typed — Scryfall didn\'t recognize it)*' : '';
   return successMessage(`🧙 **${name}** locked in ${note}.${suffix}`);
 }

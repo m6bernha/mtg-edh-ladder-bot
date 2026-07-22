@@ -1,13 +1,15 @@
 -- mtg-edh-ladder-bot D1 schema
 -- Ratings on players are the *current* values; everything else (W/L, win%,
 -- placements, streaks) is derived from game history so nothing can drift.
+--
+-- This is the post-migration shape — a fresh install applies this file and skips
+-- migrations/ entirely. Existing deployments apply migrations/ in order instead.
 
 CREATE TABLE IF NOT EXISTS players (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
   discord_user_id TEXT NOT NULL,
   username TEXT NOT NULL,
-  elo REAL NOT NULL DEFAULT 1000,
   ts_mu REAL NOT NULL DEFAULT 25,
   ts_sigma REAL NOT NULL DEFAULT 8.333333333333334,
   created_at INTEGER NOT NULL,
@@ -26,7 +28,10 @@ CREATE TABLE IF NOT EXISTS games (
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
   created_by TEXT NOT NULL,
-  reported_by TEXT
+  reported_by TEXT,
+  -- The Discord message id of this game's live card, so later commands edit it
+  -- (via bot token) rather than posting a new message. Null until the card posts.
+  message_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_games_channel_status
   ON games (guild_id, channel_id, status);
@@ -40,8 +45,8 @@ CREATE TABLE IF NOT EXISTS game_players (
   player_id INTEGER NOT NULL REFERENCES players (id),
   placement INTEGER,
   commander TEXT,
-  elo_before REAL,
-  elo_after REAL,
+  -- Scryfall art URL, cached at /commander time so the card re-renders cheaply.
+  commander_image TEXT,
   mu_before REAL,
   mu_after REAL,
   sigma_before REAL,

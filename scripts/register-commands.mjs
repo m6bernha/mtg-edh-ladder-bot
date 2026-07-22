@@ -142,10 +142,10 @@ const commands = [
       },
     ],
   },
-  { name: 'leaderboard', description: 'All-time ladder — SR, Elo, W-L, win%', contexts: [0] },
+  { name: 'leaderboard', description: 'All-time ladder — SR, W-L, win%', contexts: [0] },
   {
     name: 'stats',
-    description: 'Player profile: ratings, placements, streak, commanders',
+    description: 'Player profile: SR, placements, streak, commanders',
     contexts: [0],
     options: [
       { type: USER, name: 'player', description: 'Whose stats (default: you)' },
