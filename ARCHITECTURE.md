@@ -72,11 +72,12 @@ and whether its reply is `ephemeral`:
   Worker alive to finish the work and `PATCH` the original message.
 
 Ephemerality is decided *here*, at acknowledgement time, and cannot be changed afterward —
-you cannot make an already-sent reply private. Follow-up game commands (`/commander`,
-`/game report`, `/game bracket`, `/game cancel`) acknowledge ephemerally so their
-confirmations are visible only to the caller; the shared [live card](#the-live-match-card)
-is what the channel sees. Shared readouts (`/leaderboard`, `/stats`, `/vs`, `/undo`) stay
-public.
+you cannot make an already-sent reply private. The mid-game tweaks (`/commander`,
+`/game bracket`, `/game cancel`) acknowledge ephemerally so their confirmations are visible
+only to the caller; the shared [live card](#the-live-match-card) is what the channel sees.
+The result-bearing commands stay public — `/game report` posts the final card for the whole
+pod (and, being an interaction response, reaches the channel even if the bot can't edit the
+original card), alongside the shared readouts `/leaderboard`, `/stats`, `/vs`, and `/undo`.
 
 Autocomplete is a third case: it cannot be deferred at all. That constraint is what sets the
 Scryfall timeout budget discussed [below](#scryfall-integration).

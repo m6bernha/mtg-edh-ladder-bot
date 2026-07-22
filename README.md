@@ -44,7 +44,7 @@ The design decisions behind all of this are written up in
 |---|---|
 | `/game start` | Start a game in this channel: `@` the pod (2–6 players — 1v1 works too), optional bracket. Posts the live match card; a relative timer ticks on it. |
 | `/commander` | Log your commander for the game, with Scryfall autocomplete — its art appears on the card. Optional `partner` for Partner / Background / Friends Forever decks, stored as one deck identity. Confirms only to you. |
-| `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Updates the card with SR deltas; confirms only to you. |
+| `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Posts the final card with SR deltas for the whole pod, and stops the live timer. |
 | `/game bracket` | Set or correct the game's bracket mid-match, or after reporting. |
 | `/game cancel` | Abort the active game. Nothing is recorded. |
 | `/undo` | Revert the most recent completed game and restore every player's exact prior rating. Participants and admins only. |
