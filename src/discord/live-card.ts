@@ -4,6 +4,15 @@ import { matchState, renderMatchCard } from './card';
 import type { Env, GameRow } from '../types';
 
 /**
+ * Appended to a command's reply when the card couldn't be posted or edited —
+ * almost always because the bot lacks channel access. Surfaced so a silent 403
+ * doesn't read as success (the write itself still landed in the database).
+ */
+export const CARD_PERM_HINT =
+  "\n\n⚠️ I couldn't update the pod card — grant me **View Channel** + " +
+  '**Send Messages** in this channel, then it will keep itself up to date.';
+
+/**
  * Push a game's current state to its live card in the channel. Edits the existing
  * card when we have its id; if the card was never posted or has been deleted,
  * reposts one and relinks it so the game self-heals. Never re-pings the pod on an
