@@ -146,6 +146,19 @@ reposts a fresh card and relinks it, so the game self-heals rather than erroring
 a follow-up's own reply is ephemeral, the caller always gets a confirmation even if the
 shared card cannot be reached.
 
+**When the card can't be reached, the reply says why — by status, not by guess.** Both
+bot-token calls return the HTTP status plus Discord's own `{"message","code"}` body, and
+`cardFailureHint` maps that to the fix: `401` → the `DISCORD_BOT_TOKEN` secret is stale or
+corrupted (re-push it); `403` + code `50001` Missing Access → the bot can't see the channel
+or isn't a guild member (re-invite with the `bot` scope); `403` + code `50013` Missing
+Permissions → grant Send Messages; a bodiless `403` → the WAF (see below); `429` → retry.
+Earlier versions printed "grant me View Channel + Send Messages" for every failure, which
+sent an admin with correct permissions hunting through channel overrides while the real
+fault was a rejected token. The other tell is that everything *else* keeps working: the
+start card, the `/game report` card and the ephemeral confirmations all go through the
+interaction webhook and never touch the bot token, so a bot whose token is dead looks
+healthy right up until the first live-card edit.
+
 **Every Discord API call must send a `DiscordBot (...)` User-Agent.** Discord sits behind
 Cloudflare, whose WAF silently rejects bot-authenticated REST calls without one — as bare
 `403`s that are indistinguishable from permission errors. This cost a full debugging session

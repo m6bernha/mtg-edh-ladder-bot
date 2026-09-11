@@ -12,7 +12,7 @@ import {
 } from '../db/queries';
 import { bracketLabel, errorMessage, successMessage } from '../discord/embeds';
 import { matchState, renderMatchCard } from '../discord/card';
-import { CARD_PERM_HINT, updateLiveCard } from '../discord/live-card';
+import { updateLiveCard } from '../discord/live-card';
 import {
   collectUsers,
   displayName,
@@ -199,10 +199,10 @@ export async function handleGameBracket(i: Interaction, env: Env): Promise<Messa
 
   const old = game.bracket;
   await setBracket(env.DB, game.id, bracket);
-  const shown = await updateLiveCard(env, { ...game, bracket });
+  const card = await updateLiveCard(env, { ...game, bracket });
   const change =
     old === bracket ? `stays **${bracketLabel(bracket)}**` : `**${bracketLabel(old)}** → **${bracketLabel(bracket)}**`;
-  return successMessage(`🎚️ Bracket ${change} ${note}.${shown ? '' : CARD_PERM_HINT}`);
+  return successMessage(`🎚️ Bracket ${change} ${note}.${card.hint}`);
 }
 
 export async function handleGameCancel(i: Interaction, env: Env): Promise<MessageData> {
@@ -221,13 +221,13 @@ export async function handleGameCancel(i: Interaction, env: Env): Promise<Messag
   if (!cancelled) {
     return errorMessage('That game was already reported or cancelled — nothing to do.');
   }
-  const shown = await updateLiveCard(env, {
+  const card = await updateLiveCard(env, {
     ...active,
     status: 'cancelled',
     ended_at: Math.floor(Date.now() / 1000),
   });
   return successMessage(
     `🗑️ Game cancelled (was running <t:${active.started_at}:R>). Nothing counts — start fresh with \`/game start\`.` +
-      (shown ? '' : CARD_PERM_HINT),
+      card.hint,
   );
 }
