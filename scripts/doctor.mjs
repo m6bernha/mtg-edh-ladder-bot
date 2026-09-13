@@ -93,7 +93,7 @@ if (app.status === 200 && app.body.id !== APP_ID) {
 
 // 3. Guild membership + roles
 console.log('3. Server membership');
-const member = await get(`/guilds/${GUILD_ID}/members/@me`);
+const member = await get(`/guilds/${GUILD_ID}/members/${me.body.id}`);
 if (member.status !== 200) {
   bad(`not a member of guild ${GUILD_ID}: ${member.status} ${JSON.stringify(member.body)}`);
   console.log('    -> re-invite with scopes `bot` + `applications.commands` (README step 6).');
@@ -136,7 +136,24 @@ if (CHANNEL_ID) {
   } else {
     bad(`cannot access it: ${ch.status} ${JSON.stringify(ch.body)}`);
     if (ch.body?.code === 50001) {
-      console.log('    -> Missing Access reproduced. The bot cannot VIEW this channel. Channel -> Edit -> Permissions -> add the bot (or its role) with View Channel + Send Messages, or give the role Administrator.');
+      console.log('    -> Missing Access reproduced. The bot cannot VIEW this channel.');
+      // The guild channel list still returns the channel (with its overrides) even
+      // when the bot cannot read it, so we can say exactly who is locked out.
+      const all = await get(`/guilds/${GUILD_ID}/channels`);
+      const hidden = all.status === 200 ? all.body.find((c) => c.id === CHANNEL_ID) : null;
+      if (hidden) {
+        const name = (o) => (o.id === me.body.id ? 'bot user' : o.id === GUILD_ID ? '@everyone' : roles.body?.find((r) => r.id === o.id)?.name ?? o.id);
+        const overwrites = hidden.permission_overwrites ?? [];
+        const everyoneDeniesView = overwrites.some((o) => o.id === GUILD_ID && BigInt(o.deny) & VIEW_CHANNEL);
+        const botAllowed = overwrites.some((o) => (o.id === me.body.id || member.body.roles.includes(o.id)) && BigInt(o.allow) & VIEW_CHANNEL);
+        console.log(`    #${hidden.name} overrides: ${overwrites.map((o) => `${name(o)} allow=${o.allow} deny=${o.deny}`).join('; ') || '(none)'}`);
+        if (everyoneDeniesView && !botAllowed) {
+          console.log(`    -> private channel: @everyone is denied View Channel and none of the bot's roles (${mine.map((r) => r.name).join(', ') || 'none'}) is allowed in.`);
+          console.log(`       Fix: #${hidden.name} -> Edit Channel -> Permissions -> Add members or roles -> "${mine[mine.length - 1]?.name ?? 'EDH Ladder'}" -> allow View Channel + Send Messages + Embed Links.`);
+        }
+      } else {
+        console.log('    -> Channel -> Edit -> Permissions -> add the bot (or its role) with View Channel + Send Messages, or give the role Administrator.');
+      }
     }
     failed = true;
   }
