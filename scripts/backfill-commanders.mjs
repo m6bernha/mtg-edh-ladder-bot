@@ -21,18 +21,26 @@ import { buildIndex, isConfident, searchIndex } from '../src/commanders/search.t
 import { sqlLiteral } from '../src/commanders/sync.ts';
 
 const DB_NAME = 'edh-ladder';
+const NL = String.fromCharCode(10);
 const args = new Set(process.argv.slice(2));
 const target = args.has('--local') ? '--local' : '--remote';
 const apply = args.has('--apply');
 
-function query(sql) {
-  const out = execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --json --command "${sql.replace(/"/g, '\\"')}"`, {
+const dir = mkdtempSync(join(tmpdir(), 'edh-backfill-'));
+let fileNo = 0;
+/** Every statement goes through --file: the CLI cannot bind parameters and a
+ *  --command string would need shell escaping. `--json` returns the rows. */
+function d1(sql) {
+  const file = join(dir, `q-${++fileNo}.sql`);
+  writeFileSync(file, sql + NL);
+  const out = execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --json --file "${file}"`, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   const parsed = JSON.parse(out.slice(out.indexOf('[')));
   return parsed[0].results;
 }
+const query = d1;
 
 const indexRows = query(
   'SELECT name, norm_name, short_name, norm_short, front_name, color_identity, edhrec_rank, partner_flags FROM commanders',
@@ -108,6 +116,7 @@ if (ambiguous.length) {
   for (const a of ambiguous) console.log(`   ${a.seats}× "${a.from}"   ${a.notes.join('; ')}`);
 }
 
+process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 if (!apply) {
   if (updates.length) console.log('\nRe-run with --apply to write the confident re-links.');
   process.exit(0);
@@ -117,24 +126,17 @@ if (updates.length === 0) {
   process.exit(0);
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'edh-backfill-'));
-try {
-  const sql = updates
-    .map((u) => {
-      // Art follows the name that leads the (alphabetised) identity, as /commander does.
-      const lead = u.to.split(' + ')[0];
-      const art = artByName.get(lead) ?? null;
-      return (
-        `UPDATE game_players SET commander = ${sqlLiteral(u.to)}, ` +
-        `commander_image = COALESCE(${sqlLiteral(art)}, commander_image) ` +
-        `WHERE commander = ${sqlLiteral(u.from)};`
-      );
-    })
-    .join('\n');
-  const file = join(dir, 'backfill.sql');
-  writeFileSync(file, sql + '\n');
-  execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --file "${file}"`, { encoding: 'utf8', stdio: 'inherit' });
-  console.log(`\n✅ Applied ${updates.length} re-link(s).`);
-} finally {
-  rmSync(dir, { recursive: true, force: true });
-}
+const sql = updates
+  .map((u) => {
+    // Art follows the name that leads the (alphabetised) identity, as /commander does.
+    const lead = u.to.split(' + ')[0];
+    const art = artByName.get(lead) ?? null;
+    return (
+      `UPDATE game_players SET commander = ${sqlLiteral(u.to)}, ` +
+      `commander_image = COALESCE(${sqlLiteral(art)}, commander_image) ` +
+      `WHERE commander = ${sqlLiteral(u.from)};`
+    );
+  })
+  .join(NL);
+d1(sql);
+console.log(`${NL}✅ Applied ${updates.length} re-link(s).`);

@@ -274,34 +274,35 @@ function compareScored(a: Scored, b: Scored): number {
 }
 
 export function searchIndex(idx: SearchIndex, query: string, limit = 25): CommanderMatch[] {
-  let q = normalizeName(query);
+  const q = normalizeName(query);
   if (q.length < MIN_QUERY_CHARS) return [];
 
   const hits: Scored[] = [];
+  const matched = new Uint8Array(idx.entries.length);
+
+  // A nickname hit is added up front; the scan below still runs on the user's
+  // literal text so a real card that happens to match it is never hidden.
   const alias = idx.aliasMap.get(q);
   if (alias) {
     hits.push({ e: alias, tier: Tier.ALIAS, cost: 0 });
-    q = alias.norm; // also search the canonical name, so related cards follow the alias hit
+    matched[idx.entries.indexOf(alias)] = 1;
   }
 
   const qTokens = q.split(' ');
   const qJoined = q.replace(/ /g, '');
-  const matched = new Uint8Array(idx.entries.length);
 
   for (let i = 0; i < idx.entries.length; i++) {
-    const e = idx.entries[i];
-    if (alias && e === alias) {
-      matched[i] = 1;
-      continue;
-    }
-    const t = tierOf(e, q, qTokens, qJoined);
+    if (matched[i]) continue;
+    const t = tierOf(idx.entries[i], q, qTokens, qJoined);
     if (t !== null) {
-      hits.push({ e, tier: t, cost: 0 });
+      hits.push({ e: idx.entries[i], tier: t, cost: 0 });
       matched[i] = 1;
     }
   }
 
-  if (hits.length < limit) {
+  // The fuzzy pass is the expensive one: only when the cheap tiers under-fill
+  // the list, and never after a confident nickname hit.
+  if (!alias && hits.length < limit) {
     for (let i = 0; i < idx.entries.length; i++) {
       if (matched[i]) continue;
       const e = idx.entries[i];
