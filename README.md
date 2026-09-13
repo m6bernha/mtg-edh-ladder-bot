@@ -258,6 +258,16 @@ Discord sends a signed PING and requires a valid response. Check that
 Information — not the bot token, and not the Application ID. Re-run it if unsure, then
 `npm run deploy` again.
 
+**"I couldn't update the pod card" on every `/commander`.**
+Run `npm run doctor -- <pod channel id>` (Developer Mode → right-click the channel → Copy
+Channel ID). It uses the `.dev.vars` token to check, in order: the token is valid, it belongs
+to `DISCORD_APP_ID`, the bot is a member of `GUILD_ID`, whether any of its roles carries
+**Administrator**, and whether it can see that channel. A `403 Missing Access` on the last
+step means the channel (or its category) is private and the bot isn't on its permission list;
+a role with every box ticked is *not* Administrator and does not bypass channel overrides.
+If every check passes, the deployed Worker's `DISCORD_BOT_TOKEN` secret differs from
+`.dev.vars` — re-push it (from Git Bash, not PowerShell).
+
 **Commands don't appear in Discord.**
 `npm run register` registers to the single server in `GUILD_ID`. Confirm that id is your
 server, that the bot was invited with the `applications.commands` scope, and try fully

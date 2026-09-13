@@ -1,6 +1,6 @@
 import { getActiveOrLatestGame, getRoster, setCommander } from '../db/queries';
 import { errorMessage, successMessage } from '../discord/embeds';
-import { CARD_PERM_HINT, updateLiveCard } from '../discord/live-card';
+import { updateLiveCard } from '../discord/live-card';
 import { invoker, optString, requireGuildChannel } from '../discord/options';
 import { combineCommanders, resolveCommander } from '../scryfall';
 import type { Env, Interaction, MessageData } from '../types';
@@ -40,7 +40,7 @@ export async function handleCommander(i: Interaction, env: Env): Promise<Message
   if (!mine) return errorMessage("You're not in that game's pod.");
 
   await setCommander(env.DB, game.id, mine.player_id, name, art);
-  const shown = await updateLiveCard(env, game);
+  const card = await updateLiveCard(env, game);
   const suffix = unrecognized ? ' *(stored as typed — Scryfall didn\'t recognize it)*' : '';
-  return successMessage(`🧙 **${name}** locked in ${note}.${suffix}${shown ? '' : CARD_PERM_HINT}`);
+  return successMessage(`🧙 **${name}** locked in ${note}.${suffix}${card.hint}`);
 }

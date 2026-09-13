@@ -55,57 +55,80 @@ export async function fetchOriginalMessageId(
 }
 
 /**
- * Edit any message by id with the bot token. Unlike the interaction webhook this
- * never expires, so it can update a game's live card an hour into the match.
- * Returns false on 403 (bot lost channel access) / 404 (card deleted) / network
- * error, so the caller can degrade — repost the card rather than fail silently.
+ * Outcome of a bot-token call. `status` is the HTTP status (0 when the fetch
+ * itself threw) and `message` is Discord's own error text (`{"message","code"}`)
+ * when it sent one, so callers can tell a rejected token (401) from a channel
+ * permission problem (403) instead of guessing.
  */
-export async function editMessage(
+export interface BotCallResult {
+  ok: boolean;
+  status: number;
+  code?: number;
+  message?: string;
+  /** Message id — only set by createMessage on success. */
+  id?: string;
+}
+
+async function botCall(
   botToken: string,
-  channelId: string,
-  messageId: string,
+  method: 'PATCH' | 'POST',
+  url: string,
   data: MessageData,
-): Promise<boolean> {
+  label: string,
+): Promise<BotCallResult> {
   try {
-    const res = await fetch(`${API}/channels/${channelId}/messages/${messageId}`, {
-      method: 'PATCH',
+    const res = await fetch(url, {
+      method,
       headers: { ...JSON_HEADERS, Authorization: `Bot ${botToken}` },
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      console.error(`editMessage failed: ${res.status} ${await res.text()}`);
-      return false;
+      const text = await res.text();
+      console.error(`${label} failed: ${res.status} ${text}`);
+      let code: number | undefined;
+      let message: string | undefined;
+      try {
+        const parsed = JSON.parse(text) as { code?: number; message?: string };
+        code = parsed.code;
+        message = parsed.message;
+      } catch {
+        // Empty or HTML body — Discord's WAF, not a Discord API error.
+      }
+      return { ok: false, status: res.status, code, message };
     }
-    return true;
+    const msg = (await res.json().catch(() => ({}))) as { id?: string };
+    return { ok: true, status: res.status, id: msg.id };
   } catch (e) {
-    console.error('editMessage threw:', e);
-    return false;
+    console.error(`${label} threw:`, e);
+    return { ok: false, status: 0, message: e instanceof Error ? e.message : String(e) };
   }
 }
 
 /**
- * Post a new message to a channel with the bot token, returning its id. Used to
- * (re)create a game's live card when no card exists yet or the old one is gone.
+ * Edit any message by id with the bot token. Unlike the interaction webhook this
+ * never expires, so it can update a game's live card an hour into the match.
+ * Never throws: a 401 (bad token) / 403 (no channel access) / 404 (card deleted)
+ * / network error comes back as `ok: false` with the status, so the caller can
+ * degrade — repost the card — and tell the user what actually went wrong.
  */
-export async function createMessage(
+export function editMessage(
+  botToken: string,
+  channelId: string,
+  messageId: string,
+  data: MessageData,
+): Promise<BotCallResult> {
+  return botCall(botToken, 'PATCH', `${API}/channels/${channelId}/messages/${messageId}`, data, 'editMessage');
+}
+
+/**
+ * Post a new message to a channel with the bot token, returning its id in `id`.
+ * Used to (re)create a game's live card when no card exists yet or the old one
+ * is gone.
+ */
+export function createMessage(
   botToken: string,
   channelId: string,
   data: MessageData,
-): Promise<string | null> {
-  try {
-    const res = await fetch(`${API}/channels/${channelId}/messages`, {
-      method: 'POST',
-      headers: { ...JSON_HEADERS, Authorization: `Bot ${botToken}` },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      console.error(`createMessage failed: ${res.status} ${await res.text()}`);
-      return null;
-    }
-    const msg = (await res.json()) as { id?: string };
-    return msg.id ?? null;
-  } catch (e) {
-    console.error('createMessage threw:', e);
-    return null;
-  }
+): Promise<BotCallResult> {
+  return botCall(botToken, 'POST', `${API}/channels/${channelId}/messages`, data, 'createMessage');
 }
