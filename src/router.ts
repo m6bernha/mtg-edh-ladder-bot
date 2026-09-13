@@ -10,7 +10,7 @@ import { handleUndo } from './commands/undo';
 import { errorMessage, helpMessage } from './discord/embeds';
 import { fetchOriginalMessageId, json, patchOriginal } from './discord/api';
 import { getActiveGame, setGameMessageId } from './db/queries';
-import { searchCommanders } from './scryfall';
+import { colorEmoji, suggestCommanders } from './commanders';
 import { EPHEMERAL, ResponseType, type Env, type Interaction, type MessageData } from './types';
 
 type CommandHandler = (i: Interaction, env: Env) => Promise<MessageData>;
@@ -110,15 +110,27 @@ export async function routeCommand(
   });
 }
 
-export async function routeAutocomplete(i: Interaction, env: Env): Promise<Response> {
+/** Discord caps an autocomplete choice label at 100 characters. */
+const MAX_CHOICE_LABEL = 100;
+
+export async function routeAutocomplete(
+  i: Interaction,
+  env: Env,
+  ctx?: ExecutionContext,
+): Promise<Response> {
   const opts = i.data?.options ?? [];
   const flat = opts[0]?.type === 1 ? (opts[0].options ?? []) : opts;
   const focused = flat.find((o) => o.focused);
 
   let choices: { name: string; value: string }[] = [];
   if (i.data?.name === 'commander' && (focused?.name === 'name' || focused?.name === 'partner')) {
-    const names = await searchCommanders(String(focused.value ?? ''));
-    choices = names.map((n) => ({ name: n, value: n }));
+    const matches = await suggestCommanders(env.DB, String(focused.value ?? ''), ctx);
+    // The label carries colour identity for the eye; the value is always the exact
+    // Scryfall name, which is what /commander resolves and what stats key on.
+    choices = matches.map((m) => ({
+      name: `${colorEmoji(m.colors)} ${m.name}`.slice(0, MAX_CHOICE_LABEL),
+      value: m.name.slice(0, MAX_CHOICE_LABEL),
+    }));
   }
   return json({
     type: ResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT,
