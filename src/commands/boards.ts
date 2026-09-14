@@ -3,9 +3,8 @@ import {
   getLeaderboard,
   getPlayerByDiscordId,
   getPlayerGames,
-  getPodSnapshots,
+  getPodSnapshotsForPlayer,
   getSharedGames,
-  getTopPlayerByGame,
 } from '../db/queries';
 import { computeBadges } from '../engagement/achievements.ts';
 import { skillRating } from '../ratings/trueskill';
@@ -93,13 +92,10 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
     }
   }
 
-  // Ladder position and badges: two cheap indexed reads plus pure derivation.
-  const gameIds = games.map((g) => g.game_id);
-  const [board, pods, tops] = await Promise.all([
-    getGuildBoard(env.DB, guildId),
-    getPodSnapshots(env.DB, gameIds),
-    getTopPlayerByGame(env.DB, gameIds),
-  ]);
+  // Ladder position and badges: two indexed reads (a constant four D1 calls
+  // for the whole command, whatever the history size) plus pure derivation.
+  const [board, pods] = await Promise.all([getGuildBoard(env.DB, guildId), getPodSnapshotsForPlayer(env.DB, player.id)]);
+  const tops = new Map(games.map((g) => [g.game_id, g.top_player_id]));
   const ranked = board
     .map((b) => ({ id: b.playerId, sr: skillRating(b.mu, b.sigma) }))
     .sort((a, b) => b.sr - a.sr);

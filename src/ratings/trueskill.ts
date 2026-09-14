@@ -29,8 +29,11 @@ export function computeTrueSkill(
   ratings: TSRating[],
   placements: number[],
   opts: TSOptions = {},
+  /** Stable per-player keys (player ids) — the last tie-break, so two players
+   *  with identical ratings still rate identically whatever order they arrive in. */
+  keys?: number[],
 ): TSRating[] {
-  if (ratings.length !== placements.length) {
+  if (ratings.length !== placements.length || (keys && keys.length !== ratings.length)) {
     throw new Error('ratings/placements length mismatch');
   }
   const env = ratingEnv();
@@ -41,14 +44,16 @@ export function computeTrueSkill(
 
   // Ties are resolved through adjacent-pair factors, so results vary slightly
   // (<0.01 mu) with input order among tied players. Canonicalize the order so
-  // the reporter's arbitrary slot order can never change the outcome.
+  // the reporter's arbitrary slot order can never change the outcome. Two
+  // players with identical ratings (e.g. both fresh) fall through to `keys`.
   const order = ratings
     .map((_, i) => i)
     .sort(
       (a, b) =>
         ranks[a] - ranks[b] ||
         ratings[a].mu - ratings[b].mu ||
-        ratings[a].sigma - ratings[b].sigma,
+        ratings[a].sigma - ratings[b].sigma ||
+        (keys ? keys[a] - keys[b] : 0),
     );
   const groups = order.map((i) => [new Rating(ratings[i].mu, ratings[i].sigma)]);
   const sortedRanks = order.map((i) => ranks[i]);

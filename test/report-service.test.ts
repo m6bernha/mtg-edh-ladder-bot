@@ -111,3 +111,39 @@ describe('reportGame', () => {
     for (const r of out.roster) expect(r.sigma_after!).toBeGreaterThanOrEqual(RATING.SIGMA_MIN);
   });
 });
+
+describe('reportGame — derived facts from history', () => {
+  const hist = (player_id: number, results: ('W' | 'L' | 'D')[]) =>
+    // newest first, as getGamesForPlayers returns
+    results.map((r, i) => ({
+      player_id,
+      game_id: 100 - i,
+      started_at: 0,
+      ended_at: 1000 - i,
+      draw: r === 'D' ? 1 : 0,
+      winner_only: 0,
+      bracket: 'open',
+      placement: r === 'W' ? 1 : 2,
+      commander: null,
+      mu_before: 25,
+      mu_after: 25,
+      sigma_before: 2,
+      sigma_after: 2,
+      top_player_id: null,
+    }));
+
+  it('reads streaks newest-first: W,W,L → win streak 2; L,L,L,W → loss streak 3', async () => {
+    const { env } = setup([{ match: 'SELECT gp.player_id, g.id AS game_id', rows: [...hist(3, ['W', 'W', 'L']), ...hist(2, ['L', 'L', 'L', 'W'])] }]);
+    const out = await reportGame(env, { ...base, placements: [{ userId: 'u3', place: 1 }, { userId: 'u2', place: 2 }, { userId: 'u1', place: 3 }] });
+    if (!out.ok) throw new Error(out.error);
+    expect(out.shoutouts).toContain('🔥 **Cy** is on a 3-game win streak');
+    expect(out.shoutouts.some((s) => s.includes('first pod'))).toBe(false);
+  });
+
+  it('a winner coming off three losses snaps a skid', async () => {
+    const { env } = setup([{ match: 'SELECT gp.player_id, g.id AS game_id', rows: hist(3, ['L', 'L', 'L', 'W']) }]);
+    const out = await reportGame(env, { ...base, placements: full });
+    if (!out.ok) throw new Error(out.error);
+    expect(out.shoutouts).toContain('💪 **Cy** snaps a 3-game skid');
+  });
+});

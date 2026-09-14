@@ -321,13 +321,15 @@ export interface PlayerGameRow {
   mu_after: number;
   sigma_before: number;
   sigma_after: number;
+  /** Ladder leader before this game (Kingslayer); null pre-migration. */
+  top_player_id: number | null;
 }
 
 /** Every completed game for one player, newest first — feeds all of /stats. */
 export async function getPlayerGames(db: D1Database, playerId: number): Promise<PlayerGameRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket,
+      `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket, g.top_player_id,
               gp.placement, gp.commander,
               gp.mu_before, gp.mu_after, gp.sigma_before, gp.sigma_after
        FROM game_players gp JOIN games g ON g.id = gp.game_id
@@ -348,7 +350,7 @@ export async function getGamesForPlayers(db: D1Database, playerIds: number[]): P
   if (playerIds.length === 0) return [];
   const { results } = await db
     .prepare(
-      `SELECT gp.player_id, g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket,
+      `SELECT gp.player_id, g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket, g.top_player_id,
               gp.placement, gp.commander,
               gp.mu_before, gp.mu_after, gp.sigma_before, gp.sigma_after
        FROM game_players gp JOIN games g ON g.id = gp.game_id
@@ -455,7 +457,7 @@ export async function getCommanderMeta(
               COUNT(*) AS games,
               SUM(CASE WHEN gp.placement = 1 AND g.draw = 0 THEN 1 ELSE 0 END) AS wins,
               SUM(CASE WHEN g.draw = 1 THEN 1 ELSE 0 END) AS draws,
-              AVG(CASE WHEN g.draw = 0 THEN gp.placement END) AS avg_placement,
+              AVG(CASE WHEN g.draw = 0 AND (g.winner_only = 0 OR gp.placement = 1) THEN gp.placement END) AS avg_placement,
               COUNT(DISTINCT gp.player_id) AS pilots
        FROM game_players gp JOIN games g ON g.id = gp.game_id
        WHERE g.guild_id = ? AND g.status = 'completed' AND gp.commander IS NOT NULL
@@ -543,37 +545,23 @@ export interface PodSnapshotRow {
   sigma_rusted: number | null;
 }
 
-/** Every seat's pre-game snapshot for a set of games (achievements need the whole pod). */
-export async function getPodSnapshots(db: D1Database, gameIds: number[]): Promise<Map<number, PodSnapshotRow[]>> {
+/** Every seat's pre-game snapshot for every completed game one player sat in — one query, any history size. */
+export async function getPodSnapshotsForPlayer(db: D1Database, playerId: number): Promise<Map<number, PodSnapshotRow[]>> {
   const out = new Map<number, PodSnapshotRow[]>();
-  for (let i = 0; i < gameIds.length; i += 90) {
-    const chunk = gameIds.slice(i, i + 90);
-    const { results } = await db
-      .prepare(
-        `SELECT game_id, player_id, placement, mu_before, sigma_before, sigma_rusted
-         FROM game_players WHERE game_id IN (${chunk.map(() => '?').join(',')})`,
-      )
-      .bind(...chunk)
-      .all<PodSnapshotRow>();
-    for (const r of results) {
-      const list = out.get(r.game_id) ?? [];
-      list.push(r);
-      out.set(r.game_id, list);
-    }
-  }
-  return out;
-}
-
-/** top_player_id per game — null means pre-migration or no leader yet. */
-export async function getTopPlayerByGame(db: D1Database, gameIds: number[]): Promise<Map<number, number | null>> {
-  const out = new Map<number, number | null>();
-  for (let i = 0; i < gameIds.length; i += 90) {
-    const chunk = gameIds.slice(i, i + 90);
-    const { results } = await db
-      .prepare(`SELECT id, top_player_id FROM games WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .bind(...chunk)
-      .all<{ id: number; top_player_id: number | null }>();
-    for (const r of results) out.set(r.id, r.top_player_id);
+  const { results } = await db
+    .prepare(
+      `SELECT o.game_id, o.player_id, o.placement, o.mu_before, o.sigma_before, o.sigma_rusted
+       FROM game_players me
+       JOIN game_players o ON o.game_id = me.game_id
+       JOIN games g ON g.id = me.game_id AND g.status = 'completed'
+       WHERE me.player_id = ?`,
+    )
+    .bind(playerId)
+    .all<PodSnapshotRow>();
+  for (const r of results) {
+    const list = out.get(r.game_id) ?? [];
+    list.push(r);
+    out.set(r.game_id, list);
   }
   return out;
 }

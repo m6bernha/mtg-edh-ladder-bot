@@ -16,9 +16,8 @@ import {
   getRoster,
   type CompletionEntry,
 } from '../db/queries';
-import { predictWinProbabilities } from '../ratings/predict.ts';
-import { applyRust } from '../ratings/rust.ts';
-import { computeTrueSkill, skillRating } from '../ratings/trueskill.ts';
+import { rateGame } from '../ratings/engine.ts';
+import { skillRating } from '../ratings/trueskill.ts';
 import { isPlayerOrAdmin, validateReport, type PlacementInput } from '../validation';
 import type { Env, GameRow, RosterEntry } from '../types';
 
@@ -60,8 +59,8 @@ export async function reportGame(env: Env, req: ReportRequest): Promise<ReportOu
   if (!val.ok) return { ok: false, error: val.error };
 
   const byId = new Map(roster.map((r) => [r.discord_user_id, r]));
-  const ordered = [...req.placements].sort((a, b) => a.place - b.place).map((p) => byId.get(p.userId)!);
-  const playerIds = ordered.map((r) => r.player_id);
+  const placeOf = new Map(req.placements.map((p) => [byId.get(p.userId)!.player_id, p.place]));
+  const playerIds = roster.map((r) => r.player_id);
   const endedAt = now();
 
   const [lastPlayed, board, history] = await Promise.all([
@@ -70,26 +69,31 @@ export async function reportGame(env: Env, req: ReportRequest): Promise<ReportOu
     getGamesForPlayers(env.DB, playerIds),
   ]);
 
-  // Rust: inflate sigma for time away. The engine sees the rusted value; the
-  // snapshot keeps the raw one so /undo restores exactly what was stored.
-  const rust = ordered.map((r) => applyRust(r.ts_sigma, lastPlayed.get(r.player_id) ?? null, endedAt));
-  const ratingsIn = ordered.map((r, i) => ({ mu: r.ts_mu, sigma: rust[i].sigma }));
-  const places = ordered.map((_, idx) => idx + 1);
-  const odds = predictWinProbabilities(ratingsIn, active.id);
-  const newTs = computeTrueSkill(ratingsIn, places, { draw: req.draw, winnerOnly: req.winnerOnly });
+  // One engine for the live path and the history replay (see src/ratings/engine.ts).
+  const rated = rateGame(
+    roster.map((r) => ({
+      playerId: r.player_id,
+      placement: placeOf.get(r.player_id)!,
+      mu: r.ts_mu,
+      sigma: r.ts_sigma,
+      lastPlayedAt: lastPlayed.get(r.player_id) ?? null,
+    })),
+    { draw: req.draw, winnerOnly: req.winnerOnly, endedAt, seed: active.id },
+  );
+  const ordered = rated.map((x) => roster.find((r) => r.player_id === x.playerId)!);
 
   const before = rankBoard(board);
   const topPlayerId = before[0]?.playerId ?? null;
 
-  const entries: CompletionEntry[] = ordered.map((r, idx) => ({
-    playerId: r.player_id,
-    placement: req.draw ? 1 : idx + 1, // a draw is everyone tied for 1st
-    muBefore: r.ts_mu,
-    muAfter: newTs[idx].mu,
-    sigmaBefore: r.ts_sigma,
-    sigmaAfter: newTs[idx].sigma,
-    sigmaRusted: rust[idx].rusted ? rust[idx].sigma : null,
-    rustDays: rust[idx].daysIdle,
+  const entries: CompletionEntry[] = rated.map((x) => ({
+    playerId: x.playerId,
+    placement: x.placement,
+    muBefore: x.muBefore,
+    muAfter: x.muAfter,
+    sigmaBefore: x.sigmaBefore,
+    sigmaAfter: x.sigmaAfter,
+    sigmaRusted: x.sigmaRusted,
+    rustDays: x.rustDays,
   }));
   await completeGame(env.DB, active.id, { winnerOnly: req.winnerOnly, draw: req.draw, topPlayerId }, req.reporterId, entries, endedAt);
 
@@ -103,25 +107,26 @@ export async function reportGame(env: Env, req: ReportRequest): Promise<ReportOu
   };
   const finalRoster: RosterEntry[] = ordered.map((r, idx) => ({
     ...r,
-    placement: entries[idx].placement,
-    mu_before: r.ts_mu,
-    sigma_before: r.ts_sigma,
-    mu_after: newTs[idx].mu,
-    sigma_after: newTs[idx].sigma,
-    sigma_rusted: entries[idx].sigmaRusted,
-    rust_days: entries[idx].rustDays,
-    ts_mu: newTs[idx].mu,
-    ts_sigma: newTs[idx].sigma,
+    placement: rated[idx].placement,
+    mu_before: rated[idx].muBefore,
+    sigma_before: rated[idx].sigmaBefore,
+    mu_after: rated[idx].muAfter,
+    sigma_after: rated[idx].sigmaAfter,
+    sigma_rusted: rated[idx].sigmaRusted,
+    rust_days: rated[idx].rustDays,
+    ts_mu: rated[idx].muAfter,
+    ts_sigma: rated[idx].sigmaAfter,
   }));
 
   // After-board: the pre-game board with this pod's ratings replaced (new players appended).
+  const ratedById = new Map(rated.map((x) => [x.playerId, x]));
   const afterEntries = board.map((b) => {
-    const i = playerIds.indexOf(b.playerId);
-    return i === -1 ? b : { ...b, mu: newTs[i].mu, sigma: newTs[i].sigma };
+    const x = ratedById.get(b.playerId);
+    return x ? { ...b, mu: x.muAfter, sigma: x.sigmaAfter } : b;
   });
-  for (const [i, r] of ordered.entries()) {
+  for (const [idx, r] of ordered.entries()) {
     if (!board.some((b) => b.playerId === r.player_id)) {
-      afterEntries.push({ playerId: r.player_id, username: r.username, mu: newTs[i].mu, sigma: newTs[i].sigma, games: 0 });
+      afterEntries.push({ playerId: r.player_id, username: r.username, mu: rated[idx].muAfter, sigma: rated[idx].sigmaAfter, games: 0 });
     }
   }
   const after = rankBoard(afterEntries);
@@ -136,19 +141,20 @@ export async function reportGame(env: Env, req: ReportRequest): Promise<ReportOu
       else if (h.placement !== 1 && winStreak === 0) lossStreak++;
       else break;
     }
+    const x = rated[idx];
     return {
       playerId: r.player_id,
       username: r.username,
-      placement: entries[idx].placement,
-      srBefore: skillRating(r.ts_mu, r.ts_sigma),
-      srAfter: skillRating(newTs[idx].mu, newTs[idx].sigma),
+      placement: x.placement,
+      srBefore: skillRating(x.muBefore, x.sigmaBefore),
+      srAfter: skillRating(x.muAfter, x.sigmaAfter),
       gamesBefore: mine.length,
       personalBestBefore: mine.reduce((m, h) => Math.max(m, skillRating(h.mu_after, h.sigma_after)), 0),
       winStreakBefore: winStreak,
       lossStreakBefore: lossStreak,
       hasWonBefore: mine.some((h) => h.draw === 0 && h.placement === 1),
-      preGameWinPct: odds[idx],
-      rustDays: rust[idx].rusted ? rust[idx].daysIdle : null,
+      preGameWinPct: x.preGameWinPct,
+      rustDays: x.sigmaRusted != null ? x.rustDays : null,
     };
   });
   const shoutouts = buildShoutouts({ before, after, pod, draw: req.draw });

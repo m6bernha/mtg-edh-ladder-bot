@@ -120,6 +120,7 @@ const game = (over: Partial<PlayerGameRow> & { placement: number }): PlayerGameR
     mu_after: 25,
     sigma_before: 2,
     sigma_after: 2,
+    top_player_id: null,
     ...over,
   };
 };

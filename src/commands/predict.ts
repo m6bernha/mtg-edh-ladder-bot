@@ -29,10 +29,14 @@ export async function handlePredict(i: Interaction, env: Env): Promise<MessageDa
   const lastPlayed = await getLastPlayedAt(env.DB, roster.map((r) => r.player_id));
   const now = Math.floor(Date.now() / 1000);
 
-  // Same inputs the report will use: rust-adjusted uncertainty, seeded by game id.
-  const rust = roster.map((r) => applyRust(r.ts_sigma, lastPlayed.get(r.player_id) ?? null, now));
-  const ratings = roster.map((r, idx) => ({ mu: r.ts_mu, sigma: rust[idx].sigma }));
-  const odds = predictWinProbabilities(ratings, active.id);
+  // Same inputs and the same player-id order the report will use (see
+  // src/ratings/engine.ts), so this and the report's upset line agree.
+  const byId = [...roster].sort((a, b) => a.player_id - b.player_id);
+  const rustById = byId.map((r) => applyRust(r.ts_sigma, lastPlayed.get(r.player_id) ?? null, now));
+  const ratings = byId.map((r, idx) => ({ mu: r.ts_mu, sigma: rustById[idx].sigma }));
+  const oddsById = predictWinProbabilities(ratings, active.id);
+  const rust = roster.map((r) => rustById[byId.indexOf(r)]);
+  const odds = roster.map((r) => oddsById[byId.indexOf(r)]);
 
   const entries: PredictEntry[] = roster
     .map((r, idx) => ({
