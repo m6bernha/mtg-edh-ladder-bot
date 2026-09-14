@@ -24,7 +24,7 @@
       "binding": "DB",
 
       // Must match the name you passed to `npx wrangler d1 create <name>`.
-      "database_name": "mtg-edh-ladder-bot",
+      "database_name": "edh-ladder",
 
       // Printed by `npx wrangler d1 create`. Also visible in the Cloudflare
       // dashboard under Storage & Databases → D1. Not a secret (it's useless

@@ -152,27 +152,39 @@ const startPayload = {
   check('/game report → deferred ack', r.status === 200 && r.json.type === 5, r);
 }
 
-// 6. commander autocomplete → choices from Scryfall (or empty on timeout)
-{
+// 6. commander autocomplete → choices from the local index (or Scryfall while it is empty)
+async function autocomplete(value) {
   const r = await post({
     ...baseInteraction,
     type: 4,
     data: {
       name: 'commander',
-      options: [{ type: 3, name: 'name', value: 'atraxa', focused: true }],
+      options: [{ type: 3, name: 'name', value, focused: true }],
     },
   });
-  const choices = r.json?.data?.choices;
+  return { r, choices: r.json?.data?.choices };
+}
+{
+  const { r, choices } = await autocomplete('atraxa');
   check(
     'autocomplete → type 8 with choices array',
     r.status === 200 && r.json.type === 8 && Array.isArray(choices),
     r,
   );
   if (Array.isArray(choices) && choices.length > 0) {
-    console.log(`     ↳ scryfall live: ${choices.length} results, first: ${choices[0].name}`);
+    console.log(`     ↳ ${choices.length} results, first: ${choices[0].name} (value "${choices[0].value}")`);
   } else {
-    console.log('     ↳ scryfall returned no results (timeout is tolerated by design)');
+    console.log('     ↳ no results (empty index + Scryfall timeout is tolerated by design)');
   }
+  // Second call hits the warmed in-memory index; a typo must still find the card
+  // when the index is synced (`npm run sync-commanders -- --local`).
+  const typo = await autocomplete('atraxa preators');
+  const hit = typo.choices?.some((c) => c.value === "Atraxa, Praetors' Voice");
+  console.log(
+    hit
+      ? "     ↳ typo-tolerant: 'atraxa preators' → Atraxa, Praetors' Voice"
+      : '     ↳ typo lookup found nothing — local index not synced? (not a failure)',
+  );
 }
 
 // 7. /help inline

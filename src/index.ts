@@ -33,7 +33,7 @@ export default {
       case InteractionType.APPLICATION_COMMAND:
         return routeCommand(interaction, env, ctx);
       case InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE:
-        return routeAutocomplete(interaction, env);
+        return routeAutocomplete(interaction, env, ctx);
       default:
         return json({
           type: ResponseType.CHANNEL_MESSAGE_WITH_SOURCE,

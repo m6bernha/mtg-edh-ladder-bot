@@ -9,7 +9,9 @@
     "check": "tsc --noEmit",
     "register": "node scripts/register-commands.mjs",
     "tail": "wrangler tail",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "sync-commanders": "node scripts/sync-commanders.mjs",
+    "backfill-commanders": "node scripts/backfill-commanders.mjs"
   },
   "dependencies": {
     "discord-interactions": "^4.4.0",

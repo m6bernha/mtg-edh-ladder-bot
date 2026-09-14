@@ -43,7 +43,7 @@ The design decisions behind all of this are written up in
 | Command | What it does |
 |---|---|
 | `/game start` | Start a game in this channel: `@` the pod (2–6 players — 1v1 works too), optional bracket. Posts the live match card; a relative timer ticks on it. |
-| `/commander` | Log your commander for the game, with Scryfall autocomplete — its art appears on the card. Optional `partner` for Partner / Background / Friends Forever decks, stored as one deck identity. Confirms only to you. |
+| `/commander` | Log your commander for the game. Autocomplete is instant and typo-tolerant (`atraxa preators`, `urdragon`, `lim dul` all work) and its art appears on the card. Optional `partner` for Partner / Background / Friends Forever decks, stored as one deck identity. Confirms only to you. |
 | `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Posts the final card with SR deltas for the whole pod, and stops the live timer. |
 | `/game bracket` | Set or correct the game's bracket mid-match, or after reporting. |
 | `/game cancel` | Abort the active game. Nothing is recorded. |
@@ -96,7 +96,7 @@ npm install
 
 ```bash
 npx wrangler login                              # opens a browser to authorise Cloudflare
-npx wrangler d1 create mtg-edh-ladder-bot
+npx wrangler d1 create edh-ladder
 ```
 
 That prints a `database_id`. Copy the example config and paste it in:
@@ -108,11 +108,18 @@ cp wrangler.example.jsonc wrangler.jsonc
 Open `wrangler.jsonc` and replace `PASTE_YOUR_DATABASE_ID_HERE` with the id you were given.
 `wrangler.jsonc` is gitignored, so your database id never lands in a commit.
 
-Now create the tables:
+Now create the tables and load the commander index (every commander-legal card, pulled
+from Scryfall — about 3,400 rows, a minute of paging):
 
 ```bash
-npx wrangler d1 execute mtg-edh-ladder-bot --remote --file schema.sql
+npx wrangler d1 execute edh-ladder --remote --file schema.sql
+npm run sync-commanders
 ```
+
+The index is what makes `/commander` autocomplete instant and typo-tolerant. Re-run
+`npm run sync-commanders` after a new set releases (monthly is plenty); until you do, brand-new
+commanders simply fall back to a live Scryfall lookup. The sync is a script rather than a Worker
+cron because the Workers Free plan's 10 ms CPU budget cannot parse a Scryfall page.
 
 ### 3. Create the Discord application
 
@@ -188,12 +195,18 @@ earlier deployment with game data, apply the migrations in `migrations/` in orde
 back up first, since dropping the old Elo columns is irreversible:
 
 ```bash
-npx wrangler d1 export mtg-edh-ladder-bot --remote --output=backup.sql
-npx wrangler d1 execute mtg-edh-ladder-bot --remote --file migrations/0001_live_card.sql
-npx wrangler d1 execute mtg-edh-ladder-bot --remote --file migrations/0002_drop_elo.sql
+npx wrangler d1 export edh-ladder --remote --output=backup.sql
+npx wrangler d1 execute edh-ladder --remote --file migrations/0001_live_card.sql
+npx wrangler d1 execute edh-ladder --remote --file migrations/0002_drop_elo.sql
+npx wrangler d1 execute edh-ladder --remote --file migrations/0003_commander_index.sql
+npm run sync-commanders            # fill the new commander index
+npm run backfill-commanders        # report historical names the index spells differently
 ```
 
-Then set the new `DISCORD_BOT_TOKEN` secret (step 3) and redeploy.
+`backfill-commanders` only reports by default. It lists the stored names it would re-link
+(exact or unambiguous index matches) and the ones it refuses to guess at; re-run with
+`-- --apply` to write the confident ones. Then set the `DISCORD_BOT_TOKEN` secret (step 3) if
+you have not already, and redeploy.
 
 ---
 
@@ -215,8 +228,9 @@ smoke script generates a throwaway keypair and sends correctly signed interactio
 # 1. Generate a throwaway keypair — prints a public key
 node scripts/local-smoke.mjs keygen
 
-# 2. Create the local database (separate from your deployed one)
-npx wrangler d1 execute mtg-edh-ladder-bot --local --file schema.sql
+# 2. Create the local database (separate from your deployed one) and fill its commander index
+npx wrangler d1 execute edh-ladder --local --file schema.sql
+npm run sync-commanders -- --local
 
 # 3. Start the dev server with that public key
 npx wrangler dev --port 8787 --var DISCORD_PUBLIC_KEY:<hex-from-step-1>
@@ -226,7 +240,7 @@ node scripts/local-smoke.mjs run
 ```
 
 That exercises signature rejection, PING/PONG, starting a game, duplicate-game rejection,
-reporting, Scryfall autocomplete, and `/help`.
+reporting, typo-tolerant commander autocomplete, and `/help`.
 
 ### Project layout
 
@@ -236,13 +250,14 @@ src/
   router.ts         Command registry — the inline/deferred + ephemeral split
   types.ts          Discord payload and database row types
   validation.ts     Pure validation and permission predicates (no I/O)
-  scryfall.ts       Commander autocomplete, canonicalisation, and art, cached
+  commanders/       Local commander index: pure tiered search, aliases, Scryfall page parser
+  scryfall.ts       Live Scryfall lookups — the fallback while the index is empty
   commands/         One module per command surface
   db/               D1 queries and rating snapshot handling
   ratings/          TrueSkill (SR)
   discord/          API calls, embeds, and the live match card (card.ts, live-card.ts)
 test/               Vitest unit tests
-scripts/            Command registration and signed end-to-end smoke tests
+scripts/            Command registration, commander index sync/backfill, doctor, smoke tests
 schema.sql          Database schema (post-migration shape, for fresh installs)
 migrations/         Ordered ALTER migrations for existing deployments
 assets/             Bot avatar
@@ -277,8 +292,14 @@ restarting your Discord client.
 The bot is guild-only; every command needs server context. It does not work in DMs.
 
 **`/commander` stores the name I typed instead of the real card.**
-Scryfall lookups have a hard timeout so the bot always answers within Discord's deadline.
-On a timeout it stores your text verbatim and says so. Re-running `/commander` overwrites it.
+Nothing in the index matched, even allowing for typos, and the live Scryfall fallback did not
+recognise it either. The reply says so; re-running `/commander` and picking from autocomplete
+overwrites it. If autocomplete itself is empty, the index has not been synced —
+`npm run sync-commanders`.
+
+**`/commander` picked the wrong card for a short name.**
+Several commanders share a short name (`atraxa`, `urza`). The bot takes the most-played one
+and lists the others in its reply; re-run with the full name from autocomplete.
 
 **Ratings look wrong after a misreport.**
 `/undo` reverts the most recent completed game exactly, restoring every player's prior

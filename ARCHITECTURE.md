@@ -17,7 +17,7 @@ and one D1 database. There is no server process, no queue, no cron, and no cache
 - [Rating](#rating)
 - [Deterministic tie handling](#deterministic-tie-handling)
 - [Undo](#undo)
-- [Scryfall integration](#scryfall-integration)
+- [Commander index](#commander-index)
 - [Security model](#security-model)
 - [Known limitations](#known-limitations)
 - [Testing strategy](#testing-strategy)
@@ -38,7 +38,7 @@ flowchart TD
     D -- no --> E[400 unrecognised payload]
     D -- yes --> F{Interaction type}
     F -- PING --> G[PONG · endpoint verification]
-    F -- AUTOCOMPLETE --> H[Scryfall search · reply within 3s]
+    F -- AUTOCOMPLETE --> H[Local commander index · reply within 3s]
     F -- COMMAND --> I{Inline or deferred?}
     I -- inline --> J[Compute and reply immediately]
     I -- deferred --> K[Reply 'thinking…' now]
@@ -80,7 +80,7 @@ pod (and, being an interaction response, reaches the channel even if the bot can
 original card), alongside the shared readouts `/leaderboard`, `/stats`, `/vs`, and `/undo`.
 
 Autocomplete is a third case: it cannot be deferred at all. That constraint is what sets the
-Scryfall timeout budget discussed [below](#scryfall-integration).
+commander lookup discussed [below](#commander-index).
 
 Both paths wrap handlers in try/catch and fall back to a friendly error embed, so an
 unexpected throw surfaces as a message rather than a silently dead interaction.
@@ -234,29 +234,67 @@ the chain, the constraint is enforced and explained in the error message.
 The restore is a single `db.batch()` — the status flip and every player's rating restore
 commit together or not at all.
 
-## Scryfall integration
+## Commander index
 
-Commander names are canonicalised through [Scryfall](https://scryfall.com/docs/api) so stats
-don't fragment. Without it, "atraxa", "Atraxa, Praetors Voice" and "Atraxa, Praetors' Voice"
-become three different decks in the leaderboard.
+Commander names are canonicalised so stats don't fragment: without it, "atraxa",
+"Atraxa, Praetors Voice" and "Atraxa, Praetors' Voice" become three different decks in the
+leaderboard. The first version did this by calling [Scryfall](https://scryfall.com/docs/api)
+live on every keystroke, which had two problems. Autocomplete cannot be deferred, so the
+call had an 800 ms budget and a slow Scryfall meant an empty list; and Scryfall's search is
+literal, so a typo ("atraxa preators") found nothing at all.
 
-Two paths:
+The index replaces the live call with a local copy. `npm run sync-commanders` pages through
+Scryfall's `is:commander legal:commander` search (about 3,400 cards, 20 pages) and upserts
+one row per card into the `commanders` table: exact name, a pre-normalised name, the short
+name before the first comma, colour identity, EDHREC rank, art URLs and a partner-mechanic
+bitmask. The parser (`src/commanders/sync.ts`) is pure and shared with the tests; the script
+imports it directly under Node's type stripping, so there is one definition of what a record
+looks like.
 
-- **Autocomplete** (`/cards/search`) as the user types. This cannot be deferred, so the
-  budget is hard: **800 ms**, enforced with `AbortController`.
-- **Resolution** (`/cards/named?fuzzy=`) when the command is submitted, turning
-  `"urza lord high"` into `"Urza, Lord High Artificer"`. This runs inside an
-  already-deferred command, so it can afford **1500 ms**.
+**Why a script and not a cron.** The Workers Free plan gives an invocation 10 ms of CPU.
+One Scryfall page is ~950 KB of JSON; parsing it alone blows that budget, so a `scheduled`
+handler is not an option on that plan. A monthly `npm run sync-commanders` is the supported
+path; a stale index only means the newest commanders fall back to a live Scryfall lookup.
 
-Queries are normalised (case, punctuation) before both the cache lookup and the API call, so
-`"Atraxa, Praetors'"` and `"atraxa praetors"` hit the same entry. Results are held in a
-per-isolate `Map` with a 10-minute TTL and a 200-entry cap — Workers isolates are recycled
-freely, so this is a genuine cache, not a source of truth.
+**Search** (`src/commanders/search.ts`) is a pure function of an in-memory index and a query.
+The index is loaded once per isolate — ~3,400 rows of name/rank/colour columns, ~250 KB —
+and every query is scored in tiers:
 
-**Every failure path degrades to storing exactly what the user typed**, with a note saying
-so. A Scryfall outage makes commander names messier; it never blocks logging a game.
-Partners are canonicalised individually then joined alphabetically, so
-`Thrasios + Tymna` and `Tymna + Thrasios` are one deck identity.
+| tier | match | example |
+|---|---|---|
+| 0 exact | normalised name equal | `atraxa praetors voice` |
+| 1 short | name before the comma, or a DFC's front face | `atraxa`, `birgi` |
+| 2 alias | hard-coded community nicknames (`src/commanders/aliases.ts`) | `urdragon`, `krrik` |
+| 3 prefix | full name starts with the query | `urza lord high` |
+| 4 word prefix | an inner word starts with the query | `praetors` |
+| 5 token set | every query word is a prefix of a distinct name word, any order | `weaver tymna` |
+| 6 substring | anywhere in the name, spaces optional | `zegana` |
+| 7 fuzzy | bounded Damerau-Levenshtein per word: one edit for 4+ letters, two for 7+ | `atraxa preators` |
+
+Within a tier, EDHREC rank breaks ties, so `urza` leads with Lord High Artificer. The fuzzy
+pass is the only expensive one and runs only when the cheaper tiers under-fill the list;
+measured cost is under 3 ms per query. Normalisation strips case, punctuation and diacritics
+identically on both sides (`Lim-Dûl` ≡ `lim dul`) and is done once at sync time for the
+index, so building it in a fresh isolate costs single-digit milliseconds.
+
+**Resolution** (`/commander` submit) is deliberately more cautious than autocomplete. A tier-0
+hit, or a hit with nothing else at its tier, is committed silently. A shared short name
+(`atraxa` matches two cards) or any fuzzy hit is *ambiguous*: the bot stores the top
+candidate but says so in its reply and lists the alternatives, so a wrong guess is visible
+and one re-run away from fixed. Nothing ever blocks logging a deck — an unmatched name is
+stored as typed with a note, exactly as before.
+
+**Cold start.** The first autocomplete after an isolate spins up cannot wait for the index
+to build, so it answers from an indexed `LIKE` prefix query while `ctx.waitUntil` builds the
+in-memory index for the next keystroke. If that build is killed by the CPU limit, the load
+is retried rather than awaited forever — a stuck promise there would hang every later
+`/commander`.
+
+**Fallback.** Every entry point checks whether the index has rows. An empty or missing table
+(fresh install, migration not applied) routes to the original live-Scryfall code in
+`src/scryfall.ts`, so the bot behaves exactly as it did before the index existed.
+Partners are canonicalised individually then joined alphabetically, so `Thrasios + Tymna`
+and `Tymna + Thrasios` are one deck identity.
 
 ## Security model
 
@@ -331,7 +369,9 @@ cheap tests meaningful.
 **Unit tests (vitest)** cover the parts where correctness is subtle and silent failure is
 likely: rating math (order independence, draws, winner-only, pod sizes 2–6), validation
 predicates, the permission boundary including the admin case, payload parsing including
-malformed input, undo snapshot restoration, commander normalisation and art extraction, and
+malformed input, undo snapshot restoration, commander search (every tier, typo tolerance,
+ranking, the confidence rule) against a fixture of real Scryfall cards, the Scryfall page
+parser, the index-or-fallback routing with a fake D1, and
 the live-card renderer across every phase (active/completed/cancelled, draws, winner-only,
 and the 10-embed ceiling). Keeping `renderMatchCard` a pure function of a state object is
 what makes the entire visual layer testable this way — no mocks, no fixtures, no database.
@@ -339,7 +379,8 @@ what makes the entire visual layer testable this way — no mocks, no fixtures, 
 **End-to-end smoke tests** (`scripts/local-smoke.mjs`) run against a real `wrangler dev`
 instance with a throwaway Ed25519 keypair, sending genuinely signed interactions. They cover
 what unit tests can't: signature rejection, PING/PONG endpoint verification, the inline and
-deferred response shapes, and live Scryfall autocomplete.
+deferred response shapes, and commander autocomplete against the local index (including a
+typo, when the local index has been synced).
 
 CI runs typecheck, unit tests, and `npm audit --audit-level=high` on every push and pull
 request.
