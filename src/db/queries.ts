@@ -286,25 +286,74 @@ export interface LeaderboardRow extends PlayerRow {
   games: number;
   wins: number;
   draws: number;
+  last_played_at: number;
 }
 
-export async function getLeaderboard(db: D1Database, guildId: string): Promise<LeaderboardRow[]> {
+export async function getLeaderboard(
+  db: D1Database,
+  guildId: string,
+  limit = 20,
+  offset = 0,
+): Promise<LeaderboardRow[]> {
   const { results } = await db
     .prepare(
       `SELECT p.*,
          COUNT(gp.game_id) AS games,
          SUM(CASE WHEN gp.placement = 1 AND g.draw = 0 THEN 1 ELSE 0 END) AS wins,
-         SUM(CASE WHEN g.draw = 1 THEN 1 ELSE 0 END) AS draws
+         SUM(CASE WHEN g.draw = 1 THEN 1 ELSE 0 END) AS draws,
+         MAX(g.ended_at) AS last_played_at
        FROM players p
        JOIN game_players gp ON gp.player_id = p.id
        JOIN games g ON g.id = gp.game_id AND g.status = 'completed'
        WHERE p.guild_id = ?
        GROUP BY p.id
-       ORDER BY (p.ts_mu - 3 * p.ts_sigma) DESC
-       LIMIT 20`,
+       ORDER BY (p.ts_mu - 3 * p.ts_sigma) DESC, p.username
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(guildId, limit, offset)
+    .all<LeaderboardRow>();
+  return results;
+}
+
+export async function getLeaderboardCount(db: D1Database, guildId: string): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(DISTINCT p.id) AS n FROM players p
+       JOIN game_players gp ON gp.player_id = p.id
+       JOIN games g ON g.id = gp.game_id AND g.status = 'completed'
+       WHERE p.guild_id = ?`,
     )
     .bind(guildId)
-    .all<LeaderboardRow>();
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export interface RecentResultRow {
+  player_id: number;
+  rn: number; // 1 = newest
+  placement: number | null;
+  draw: number;
+  mu_before: number | null;
+  sigma_before: number | null;
+}
+
+/**
+ * Each rated player's last `n` results (newest first), plus the rating they
+ * held before their newest game — enough for the form string and the
+ * rank-movement arrow on the leaderboard in one query.
+ */
+export async function getRecentResults(db: D1Database, guildId: string, n: number): Promise<RecentResultRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT player_id, rn, placement, draw, mu_before, sigma_before FROM (
+         SELECT gp.player_id, gp.placement, g.draw, gp.mu_before, gp.sigma_before,
+                ROW_NUMBER() OVER (PARTITION BY gp.player_id ORDER BY g.ended_at DESC, g.id DESC) AS rn
+         FROM game_players gp JOIN games g ON g.id = gp.game_id
+         WHERE g.guild_id = ? AND g.status = 'completed')
+       WHERE rn <= ?`,
+    )
+    .bind(guildId, n)
+    .all<RecentResultRow>();
   return results;
 }
 
@@ -638,5 +687,58 @@ export async function getSeatsInWindow(
     )
     .bind(guildId, sinceTs, untilTs)
     .all<DigestSeatRow>();
+  return results;
+}
+
+// ---- Card flows / profile extras ----
+
+export interface RecentCommanderRow {
+  commander: string;
+  games: number;
+  last_at: number;
+}
+
+/** A player's distinct decks, most recently played first — the card's quick-pick. */
+export async function getRecentCommanders(db: D1Database, playerId: number, limit: number): Promise<RecentCommanderRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT gp.commander, COUNT(*) AS games, MAX(g.ended_at) AS last_at
+       FROM game_players gp JOIN games g ON g.id = gp.game_id
+       WHERE gp.player_id = ? AND g.status = 'completed' AND gp.commander IS NOT NULL
+       GROUP BY gp.commander
+       ORDER BY last_at DESC
+       LIMIT ?`,
+    )
+    .bind(playerId, limit)
+    .all<RecentCommanderRow>();
+  return results;
+}
+
+export interface RivalRow {
+  opponent_id: number;
+  username: string;
+  shared: number;
+  /** Games where the opponent finished above me (non-draw). */
+  above_me: number;
+  /** Games where I finished above the opponent (non-draw). */
+  below_me: number;
+}
+
+/** Everyone a player has shared a pod with, and who finished above whom. */
+export async function getRivals(db: D1Database, playerId: number): Promise<RivalRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT o.player_id AS opponent_id, p.username, COUNT(*) AS shared,
+              SUM(CASE WHEN g.draw = 0 AND o.placement < me.placement THEN 1 ELSE 0 END) AS above_me,
+              SUM(CASE WHEN g.draw = 0 AND me.placement < o.placement THEN 1 ELSE 0 END) AS below_me
+       FROM game_players me
+       JOIN game_players o ON o.game_id = me.game_id AND o.player_id <> me.player_id
+       JOIN games g ON g.id = me.game_id AND g.status = 'completed'
+       JOIN players p ON p.id = o.player_id
+       WHERE me.player_id = ?
+       GROUP BY o.player_id`,
+    )
+    .bind(playerId)
+    .all<RivalRow>();
   return results;
 }

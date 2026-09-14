@@ -48,8 +48,8 @@ The design decisions behind all of this are written up in
 | `/game bracket` | Set or correct the game's bracket mid-match, or after reporting. |
 | `/game cancel` | Abort the active game. Nothing is recorded. |
 | `/undo` | Revert the most recent completed game and restore every player's exact prior rating. Participants and admins only. |
-| `/leaderboard` | All-time ladder: SR, W–L, win %. |
-| `/stats` | Player profile: ladder rank, SR, placement spread, current streak, recent form, commanders, badges. |
+| `/leaderboard` | The ladder: SR, record, win %, last-five form, ▲▼ movement since each player's last game. Paged with ◀ ▶. |
+| `/stats` | Player profile: ladder rank, SR with a sparkline, placement spread, streak and form, record by bracket, nemesis and favourite victim, commanders (with art), badges. |
 | `/vs` | Head-to-head between two players. |
 | `/meta` | The commander meta: games, wins, win %, average finish and pilot count per commander (3+ games). Paginated. |
 | `/history` | Recent games — winner and their commander, pod size, bracket, length. Optional `player` filter. Paginated. |
@@ -57,10 +57,12 @@ The design decisions behind all of this are written up in
 | `/config digest-channel` | Admins: post a weekly ladder digest (games, most active, biggest climber, commander of the week, top 3) to a channel every Monday. `/config digest-off` stops it. |
 | `/help` | In-Discord cheatsheet. |
 
-The **live match card** is the centrepiece: `/game start` posts one message, and
-`/commander`, `/game bracket`, `/game report` and `/game cancel` all edit that same message
-instead of posting new ones. Follow-up commands reply to you privately (ephemerally) — the
-card carries the news for the channel.
+The **live match card** is the centrepiece: `/game start` posts one message with three
+buttons — **🧙 Set commander**, **🏁 Report result**, **🗑️ Cancel game** — and every
+button and every command edits that same message instead of posting new ones. Set commander
+offers your recent decks first, then a typo-tolerant search; Report result walks the pod
+through 1st, 2nd, 3rd… (or winner-only / draw) with a select menu and a Confirm. Follow-ups
+reply to you privately (ephemerally) — the card carries the news for the channel.
 
 ### Ratings, briefly
 
@@ -229,6 +231,10 @@ future games. It refuses to run while a game is active and takes a `wrangler d1 
 into `backups/` before writing. Tell the pod: every SR in the channel scrollback becomes
 history at that point.
 
+Finish or cancel any game in progress before deploying: the new live card uses Discord's
+Components V2, and a card posted by the previous version cannot be edited into the new
+shape (the bot reposts a fresh card for that game instead).
+
 `backfill-commanders` only reports by default. It lists the stored names it would re-link
 (exact or unambiguous index matches) and the ones it refuses to guess at; re-run with
 `-- --apply` to write the confident ones. Then set the `DISCORD_BOT_TOKEN` secret (step 3) if
@@ -265,8 +271,9 @@ npx wrangler dev --port 8787 --var DISCORD_PUBLIC_KEY:<hex-from-step-1>
 node scripts/local-smoke.mjs run
 ```
 
-That exercises signature rejection, PING/PONG, starting a game, duplicate-game rejection,
-reporting, typo-tolerant commander autocomplete, and `/help`.
+That exercises signature rejection, PING/PONG, starting a game, the card's buttons (report
+picker, cancel confirm, commander modal), duplicate-game rejection, reporting, typo-tolerant
+commander autocomplete, the readouts, the digest cron, and `/help`.
 
 ### Project layout
 
@@ -283,7 +290,8 @@ src/
   engagement/       Shoutouts, badges and the weekly digest (pure) + the cron poster
   db/               D1 queries and rating snapshot handling
   ratings/          TrueSkill (SR), the tunables, rust, /predict
-  discord/          API calls, embeds, and the live match card (card.ts, live-card.ts)
+  discord/          API calls, Components V2 builders, the live card, readouts, custom-id grammar
+  flows/            Button / select / modal handlers: set commander, report, cancel, paging
 test/               Vitest unit tests
 scripts/            Command registration, index sync/backfill, rating recompute, doctor, smoke tests
 schema.sql          Database schema (post-migration shape, for fresh installs)

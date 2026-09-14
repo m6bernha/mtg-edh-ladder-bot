@@ -8,22 +8,30 @@ export interface Env {
 
 // ---- Discord interaction payload (minimal, hand-rolled) ----
 
+import type { Component, ModalData } from './discord/components.ts';
+
 export const InteractionType = {
   PING: 1,
   APPLICATION_COMMAND: 2,
   MESSAGE_COMPONENT: 3,
   APPLICATION_COMMAND_AUTOCOMPLETE: 4,
+  MODAL_SUBMIT: 5,
 } as const;
 
 export const ResponseType = {
   PONG: 1,
   CHANNEL_MESSAGE_WITH_SOURCE: 4,
   DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE: 5,
+  DEFERRED_UPDATE_MESSAGE: 6,
+  UPDATE_MESSAGE: 7,
   APPLICATION_COMMAND_AUTOCOMPLETE_RESULT: 8,
+  MODAL: 9,
 } as const;
 
 /** Message flag: only the invoking user sees the reply. */
 export const EPHEMERAL = 64;
+
+export type { Component, ModalData };
 
 export interface DiscordUser {
   id: string;
@@ -40,6 +48,16 @@ export interface InteractionOption {
   focused?: boolean;
 }
 
+/** A submitted modal field — Discord nests these under Label (or legacy Action Row) wrappers. */
+export interface ModalResponseComponent {
+  type: number;
+  custom_id?: string;
+  value?: string;
+  values?: string[];
+  component?: ModalResponseComponent;
+  components?: ModalResponseComponent[];
+}
+
 export interface Interaction {
   type: number;
   id: string;
@@ -49,10 +67,18 @@ export interface Interaction {
   channel_id?: string;
   member?: { user: DiscordUser; permissions?: string; nick?: string | null };
   user?: DiscordUser;
+  /** For component interactions: the message the component sits on. */
+  message?: { id: string; flags?: number };
   data?: {
+    /** Slash commands and autocomplete. */
     name: string;
     options?: InteractionOption[];
     resolved?: { users?: Record<string, DiscordUser> };
+    /** Components and modals. */
+    custom_id?: string;
+    component_type?: number;
+    values?: string[];
+    components?: ModalResponseComponent[];
   };
 }
 
@@ -68,10 +94,15 @@ export interface Embed {
   timestamp?: string;
 }
 
-/** Body of a message the bot sends (initial response or webhook edit). */
+/**
+ * Body of a message the bot sends (initial response or webhook edit). Either
+ * classic (`content`/`embeds`) or Components V2 (`components`, which
+ * src/discord/api.ts flags automatically) — never both.
+ */
 export interface MessageData {
   content?: string;
   embeds?: Embed[];
+  components?: Component[];
   allowed_mentions?: { users?: string[]; parse?: string[] };
   flags?: number; // EPHEMERAL to hide from everyone but the invoker
 }

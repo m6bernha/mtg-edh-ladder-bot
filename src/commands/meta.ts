@@ -1,6 +1,7 @@
 import { getCommanderColors } from '../commanders';
 import { getCommanderMeta, getCommanderMetaCount, type CommanderMetaRow } from '../db/queries';
-import { errorMessage, infoMessage, metaMessage } from '../discord/embeds';
+import { metaMessage } from '../discord/boards.ts';
+import { errorMessage, infoMessage } from '../discord/embeds';
 import { optInteger, requireGuild } from '../discord/options';
 import type { Env, Interaction, MessageData } from '../types';
 

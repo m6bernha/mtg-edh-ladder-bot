@@ -1,5 +1,6 @@
 import { getPlayerByDiscordId, getRecentGames, getRecentGamesCount, type HistoryRow } from '../db/queries';
-import { errorMessage, historyMessage, infoMessage } from '../discord/embeds';
+import { historyMessage } from '../discord/boards.ts';
+import { errorMessage, infoMessage } from '../discord/embeds';
 import { displayName, optInteger, optString, requireGuild, resolvedUser } from '../discord/options';
 import type { Env, Interaction, MessageData } from '../types';
 

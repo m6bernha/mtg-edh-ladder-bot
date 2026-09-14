@@ -1,7 +1,7 @@
 import { verifyKey } from 'discord-interactions';
 import { json } from './discord/api';
 import { parseInteraction } from './discord/options';
-import { routeAutocomplete, routeCommand } from './router';
+import { routeAutocomplete, routeCommand, routeComponent, routeModal } from './router';
 import { postWeeklyDigests } from './engagement/post-digest.ts';
 import { InteractionType, ResponseType, type Env } from './types';
 
@@ -35,6 +35,10 @@ export default {
         return routeCommand(interaction, env, ctx);
       case InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE:
         return routeAutocomplete(interaction, env, ctx);
+      case InteractionType.MESSAGE_COMPONENT:
+        return routeComponent(interaction, env, ctx);
+      case InteractionType.MODAL_SUBMIT:
+        return routeModal(interaction, env, ctx);
       default:
         return json({
           type: ResponseType.CHANNEL_MESSAGE_WITH_SOURCE,

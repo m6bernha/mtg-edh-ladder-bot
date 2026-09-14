@@ -7,7 +7,8 @@ import {
   setBracket,
   upsertPlayers,
 } from '../db/queries';
-import { bracketLabel, errorMessage, shoutoutsEmbed, successMessage } from '../discord/embeds';
+import { withShoutouts } from '../discord/boards.ts';
+import { bracketLabel, errorMessage, successMessage } from '../discord/embeds';
 import { matchState, renderMatchCard } from '../discord/card';
 import { updateLiveCard } from '../discord/live-card';
 import {
@@ -134,9 +135,7 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   // this command's PUBLIC reply — an interaction response, so the whole pod sees
   // it even when the bot can't edit the original card.
   await updateLiveCard(env, outcome.game);
-  const reply = renderMatchCard(matchState(outcome.game, outcome.roster));
-  if (outcome.shoutouts.length) reply.embeds!.push(shoutoutsEmbed(outcome.shoutouts));
-  return reply;
+  return withShoutouts(renderMatchCard(matchState(outcome.game, outcome.roster)), outcome.shoutouts);
 }
 
 export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {

@@ -11,10 +11,18 @@ import { handleMeta } from './commands/meta';
 import { handleHistory } from './commands/history';
 import { handlePredict } from './commands/predict';
 import { handleConfig } from './commands/config';
-import { errorMessage, helpMessage } from './discord/embeds';
-import { fetchOriginalMessageId, json, patchOriginal } from './discord/api';
+import { helpMessage } from './discord/boards.ts';
+import { errorMessage } from './discord/embeds';
+import { fetchOriginalMessageId, json, patchOriginal, withV2 } from './discord/api';
+import { parseId } from './discord/custom-id.ts';
 import { getActiveGame, setGameMessageId } from './db/queries';
 import { colorEmoji, suggestCommanders } from './commanders';
+import { cancelFlow } from './flows/cancel.ts';
+import { commanderFlow } from './flows/commander.ts';
+import { pageFlow } from './flows/pages.ts';
+import { reportFlow } from './flows/report.ts';
+import { errorV2 } from './flows/shared.ts';
+import type { ComponentHandler, ComponentReply } from './flows/types.ts';
 import { EPHEMERAL, ResponseType, type Env, type Interaction, type MessageData } from './types';
 
 type CommandHandler = (i: Interaction, env: Env) => Promise<MessageData>;
@@ -100,7 +108,7 @@ export async function routeCommand(
     }
     if (spec.ephemeral) data.flags = (data.flags ?? 0) | EPHEMERAL;
     if (spec.after) ctx.waitUntil(spec.after(i, env));
-    return json({ type: ResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data });
+    return json({ type: ResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data: withV2(data) });
   }
 
   ctx.waitUntil(
@@ -115,6 +123,7 @@ export async function routeCommand(
       await patchOriginal(i.application_id, i.token, data);
     })(),
   );
+  // A deferred ack may carry only the EPHEMERAL flag; the V2 flag goes on the edit.
   return json({
     type: ResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
     data: spec.ephemeral ? { flags: EPHEMERAL } : undefined,
@@ -148,3 +157,88 @@ export async function routeAutocomplete(
     data: { choices },
   });
 }
+
+// ---- Components (buttons, selects) and modals ----
+
+const COMPONENTS: Record<string, ComponentHandler> = {
+  ...cancelFlow,
+  ...commanderFlow,
+  ...reportFlow,
+  ...pageFlow,
+};
+
+/** Modal submits share the cmd:* handlers; only cmd:modal is a modal today. */
+const MODALS: Record<string, ComponentHandler> = {
+  'cmd:modal': commanderFlow['cmd:modal'],
+};
+
+const STALE = errorV2('That button is from an older card.');
+
+async function sendReply(i: Interaction, ctx: ExecutionContext, reply: ComponentReply): Promise<Response> {
+  switch (reply.kind) {
+    case 'update':
+      return json({ type: ResponseType.UPDATE_MESSAGE, data: withV2(reply.data) });
+    case 'reply': {
+      const data = withV2(reply.data);
+      if (reply.ephemeral) data.flags = (data.flags ?? 0) | EPHEMERAL;
+      return json({ type: ResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data });
+    }
+    case 'modal':
+      return json({ type: ResponseType.MODAL, data: reply.data });
+    case 'deferUpdate':
+      ctx.waitUntil(
+        (async () => {
+          let data: MessageData | null;
+          try {
+            data = await reply.work();
+          } catch (e) {
+            console.error(`${i.data?.custom_id} failed:`, e);
+            data = errorV2('Something went wrong — try again.');
+          }
+          if (data) await patchOriginal(i.application_id, i.token, data);
+        })(),
+      );
+      return json({ type: ResponseType.DEFERRED_UPDATE_MESSAGE });
+    case 'deferReply':
+      ctx.waitUntil(
+        (async () => {
+          let data: MessageData;
+          try {
+            data = await reply.work();
+          } catch (e) {
+            console.error(`${i.data?.custom_id} failed:`, e);
+            data = errorV2('Something went wrong — try again.');
+          }
+          await patchOriginal(i.application_id, i.token, data);
+        })(),
+      );
+      return json({
+        type: ResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+        data: reply.ephemeral ? { flags: EPHEMERAL } : undefined,
+      });
+  }
+}
+
+async function dispatch(
+  table: Record<string, ComponentHandler>,
+  i: Interaction,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const id = parseId(i.data?.custom_id);
+  const handler = id ? table[`${id.ns}:${id.verb}`] : undefined;
+  if (!id || !handler) {
+    return sendReply(i, ctx, { kind: 'reply', data: STALE, ephemeral: true });
+  }
+  let reply: ComponentReply;
+  try {
+    reply = await handler(i, env, id);
+  } catch (e) {
+    console.error(`${i.data?.custom_id} failed:`, e);
+    reply = { kind: 'reply', data: errorV2('Something went wrong — try again.'), ephemeral: true };
+  }
+  return sendReply(i, ctx, reply);
+}
+
+export const routeComponent = (i: Interaction, env: Env, ctx: ExecutionContext) => dispatch(COMPONENTS, i, env, ctx);
+export const routeModal = (i: Interaction, env: Env, ctx: ExecutionContext) => dispatch(MODALS, i, env, ctx);
