@@ -15,6 +15,7 @@ and one D1 database. There is no server process, no queue, no cron, and no cache
 - [Data model: store facts, derive everything else](#data-model-store-facts-derive-everything-else)
 - [The live match card](#the-live-match-card)
 - [Rating](#rating)
+- [Rating dynamics](#rating-dynamics)
 - [Deterministic tie handling](#deterministic-tie-handling)
 - [Undo](#undo)
 - [Commander index](#commander-index)
@@ -194,6 +195,53 @@ nobody agreed on. An earlier version also ran a parallel pairwise Elo as a secon
 number; it was removed — one uncertainty-aware rating that actually models the pod beats two
 numbers players have to reconcile.
 
+## Rating dynamics
+
+The first version ran TrueSkill with its defaults, and in a closed group that plays each
+other every week the ratings went stale: σ collapsed to ~0.7 within a few dozen games, a
+4-pod win moved the winner +6 SR, and the order froze because nothing could cross a 100-SR
+gap. Two changes, both in `src/ratings/config.ts`, fix that; the numbers there were
+measured by simulation with `ts-trueskill` itself.
+
+**Motion (τ).** TrueSkill inflates σ² by τ² before every game so skill is allowed to drift.
+The default is σ₀/100 ≈ 0.083; the bot uses σ₀/12 ≈ 0.694. Settled σ lands near 2.0
+instead of 0.7, and the same 4-pod finish is worth +45 / +17 / −10 / −45 SR. A floor
+(`SIGMA_MIN` = 1.5) is applied to every stored σ as a backstop: below ~1.25 the winner of an
+even pod gains nothing, which is the degenerate case being excluded.
+
+**Rust.** At report time each player's σ is inflated for time away from the table:
+
+```
+σ' = min(σ₀, sqrt(σ² + K² · max(0, daysIdle − 7)))        K = 0.5
+```
+
+From σ = 2.0 that is 2.40 after 14 idle days (−48 SR), 3.12 after 30 (−135), 4.15 after 60.
+It reads as harsh until the recovery is seen: a rusted player at σ = 4 who wins a pod of
+settled players gains about +200 SR in that one game. Rust means "provisional again", not
+"demoted". `daysIdle` is measured from the player's last completed game to *this* game's
+timestamp — never the wall clock — so a replay reproduces every historical value exactly.
+
+**Rust and undo.** `sigma_before` keeps its meaning: the σ that was stored before the report,
+which is what `/undo` restores, exact by construction. The inflated value the engine actually
+saw is recorded separately as `sigma_rusted` (NULL when no rust applied), with `rust_days`
+for display. Storing the rusted value in `sigma_before` would leave an undone player
+permanently rusted; storing only the raw value would make the snapshot unable to explain
+`mu_after`. So both are kept.
+
+**Recompute.** Constants only affect future games, and the user's *history* is what felt
+stale, so `scripts/recompute-ratings.mjs` replays every completed game in order through the
+same `src/ratings/*.ts` the Worker runs (imported directly under Node's type stripping — one
+engine, no reimplementation), rewriting the snapshots, `games.top_player_id` and the current
+ratings. It is a script rather than an admin route: the Worker's only authentication is
+Discord's request signature, and a secret-guarded public route would be a new attack surface
+for something run a couple of times a year. Dry run by default; `--apply` takes a D1 export
+first; refuses while a game is active; idempotent, so a half-finished run is repaired by
+re-running.
+
+**Predict.** `/predict` samples each player's performance from N(μ, σ² + β²) a few thousand
+times (seeded by the game id, so it is deterministic) and counts first places. The same
+odds, computed inside the report, drive the "upset" shoutout.
+
 ## Deterministic tie handling
 
 This is the subtlest part of the codebase.
@@ -348,8 +396,9 @@ race detection. For a bot where a pod reports one game at a time in one channel,
 the better trade. Single-statement writes (`cancelGame`) *do* check their row count and
 report honestly when they lose a race.
 
-**No pagination.** `/leaderboard` returns the top 20 and `/stats` reads a player's full
-history. Fine for a friend group; a server with thousands of games would want limits.
+**Partial pagination.** `/meta` and `/history` page; `/leaderboard` returns the top 20 and
+`/stats` reads a player's full history. Fine for a friend group; a server with thousands of
+games would want limits everywhere.
 
 **Minimal migrations.** `schema.sql` is idempotent DDL (`CREATE TABLE IF NOT EXISTS`) and
 represents the current shape, so a fresh install applies it and is done. Schema *changes* to
@@ -360,6 +409,11 @@ ordered files plus a one-line changelog per file is enough; a real runner is the
 step if the schema starts moving often.
 
 **Guild-only.** Every command requires server context; nothing works in DMs.
+
+**The weekly digest runs on a cron with no user in the loop.** Its failures are only
+visible in `wrangler tail`. A digest channel the bot can no longer post to (403/404) clears
+the setting automatically rather than failing every Monday forever; any other error is
+logged per guild and the loop continues.
 
 ## Testing strategy
 

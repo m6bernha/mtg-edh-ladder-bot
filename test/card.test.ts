@@ -17,6 +17,7 @@ function game(overrides: Partial<GameRow> = {}): GameRow {
     created_by: 'u1',
     reported_by: null,
     message_id: null,
+    top_player_id: null,
     ...overrides,
   };
 }
@@ -32,6 +33,8 @@ function player(overrides: Partial<RosterEntry> = {}): RosterEntry {
     mu_after: null,
     sigma_before: null,
     sigma_after: null,
+    sigma_rusted: null,
+    rust_days: null,
     discord_user_id: 'd1',
     username: 'Alice',
     ts_mu: 25,

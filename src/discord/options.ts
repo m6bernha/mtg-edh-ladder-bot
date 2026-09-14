@@ -49,6 +49,11 @@ export function optString(options: InteractionOption[], name: string): string | 
   return typeof v === 'string' ? v : undefined;
 }
 
+export function optInteger(options: InteractionOption[], name: string): number | undefined {
+  const v = options.find((o) => o.name === name)?.value;
+  return typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : undefined;
+}
+
 export function optBoolean(options: InteractionOption[], name: string): boolean | undefined {
   const v = options.find((o) => o.name === name)?.value;
   return typeof v === 'boolean' ? v : undefined;

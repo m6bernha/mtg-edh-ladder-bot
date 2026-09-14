@@ -1,4 +1,13 @@
-import { getLeaderboard, getPlayerByDiscordId, getPlayerGames, getSharedGames } from '../db/queries';
+import {
+  getGuildBoard,
+  getLeaderboard,
+  getPlayerByDiscordId,
+  getPlayerGames,
+  getPodSnapshots,
+  getSharedGames,
+  getTopPlayerByGame,
+} from '../db/queries';
+import { computeBadges } from '../engagement/achievements.ts';
 import { skillRating } from '../ratings/trueskill';
 import {
   errorMessage,
@@ -84,8 +93,23 @@ export async function handleStats(i: Interaction, env: Env): Promise<MessageData
     }
   }
 
+  // Ladder position and badges: two cheap indexed reads plus pure derivation.
+  const gameIds = games.map((g) => g.game_id);
+  const [board, pods, tops] = await Promise.all([
+    getGuildBoard(env.DB, guildId),
+    getPodSnapshots(env.DB, gameIds),
+    getTopPlayerByGame(env.DB, gameIds),
+  ]);
+  const ranked = board
+    .map((b) => ({ id: b.playerId, sr: skillRating(b.mu, b.sigma) }))
+    .sort((a, b) => b.sr - a.sr);
+  const position = ranked.findIndex((r) => r.id === player.id);
+  const badges = computeBadges(games, pods, tops, player.id);
+
   const targetUser = resolvedUser(i, targetId);
   const view: StatsView = {
+    rank: position === -1 ? undefined : { rank: position + 1, of: ranked.length },
+    badges,
     username: targetUser ? displayName(targetUser) : player.username,
     sr: skillRating(player.ts_mu, player.ts_sigma),
     mu: player.ts_mu,

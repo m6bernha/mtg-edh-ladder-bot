@@ -35,8 +35,12 @@ if (!APP_ID || !TOKEN || !GUILD_ID) {
 
 const USER = 6;
 const STRING = 3;
+const INTEGER = 4;
 const BOOLEAN = 5;
+const CHANNEL = 7;
 const SUB = 1;
+
+const pageOption = { type: INTEGER, name: 'page', description: 'Page number', min_value: 1 };
 
 const bracketOption = {
   type: STRING,
@@ -164,6 +168,43 @@ const commands = [
     name: 'undo',
     description: 'Revert the most recent completed game (participants/admins)',
     contexts: [0],
+  },
+  {
+    name: 'meta',
+    description: 'Commander meta: games, win rate, average finish, pilots',
+    contexts: [0],
+    options: [pageOption],
+  },
+  {
+    name: 'history',
+    description: 'Recent games — winner, commander, bracket, length',
+    contexts: [0],
+    options: [
+      { type: USER, name: 'player', description: 'Only games this player sat in' },
+      pageOption,
+    ],
+  },
+  {
+    name: 'predict',
+    description: "Win odds for the pod in progress, from everyone's rating",
+    contexts: [0],
+  },
+  {
+    name: 'config',
+    description: 'Bot settings (admins)',
+    contexts: [0],
+    default_member_permissions: '32', // MANAGE_GUILD
+    options: [
+      {
+        type: SUB,
+        name: 'digest-channel',
+        description: 'Post a weekly ladder digest to a channel (omit channel to show the current one)',
+        options: [
+          { type: CHANNEL, name: 'channel', description: 'Where the digest posts', channel_types: [0] },
+        ],
+      },
+      { type: SUB, name: 'digest-off', description: 'Stop the weekly digest' },
+    ],
   },
   { name: 'help', description: 'How the EDH ladder works', contexts: [0] },
 ];

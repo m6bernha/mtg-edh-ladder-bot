@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS games (
   reported_by TEXT,
   -- The Discord message id of this game's live card, so later commands edit it
   -- (via bot token) rather than posting a new message. Null until the card posts.
-  message_id TEXT
+  message_id TEXT,
+  -- Who led the ladder before this game was reported (Kingslayer badge).
+  top_player_id INTEGER REFERENCES players (id)
 );
 CREATE INDEX IF NOT EXISTS idx_games_channel_status
   ON games (guild_id, channel_id, status);
@@ -51,9 +53,23 @@ CREATE TABLE IF NOT EXISTS game_players (
   mu_after REAL,
   sigma_before REAL,
   sigma_after REAL,
+  -- Rust: the inflated sigma fed to the engine when the player had been idle
+  -- (NULL = none applied) and how many days idle they were. sigma_before stays
+  -- the raw stored value so /undo restores it exactly.
+  sigma_rusted REAL,
+  rust_days INTEGER,
   PRIMARY KEY (game_id, player_id)
 );
 CREATE INDEX IF NOT EXISTS idx_gp_player ON game_players (player_id);
+CREATE INDEX IF NOT EXISTS idx_gp_commander ON game_players (commander);
+
+-- Per-guild configuration (weekly digest channel).
+CREATE TABLE IF NOT EXISTS settings (
+  guild_id          TEXT PRIMARY KEY,
+  digest_channel_id TEXT,
+  updated_at        INTEGER NOT NULL,
+  updated_by        TEXT NOT NULL
+);
 
 -- Local commander index (see migrations/0003_commander_index.sql for rationale).
 CREATE TABLE IF NOT EXISTS commanders (

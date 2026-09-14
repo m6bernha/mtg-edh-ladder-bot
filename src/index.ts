@@ -2,6 +2,7 @@ import { verifyKey } from 'discord-interactions';
 import { json } from './discord/api';
 import { parseInteraction } from './discord/options';
 import { routeAutocomplete, routeCommand } from './router';
+import { postWeeklyDigests } from './engagement/post-digest.ts';
 import { InteractionType, ResponseType, type Env } from './types';
 
 export default {
@@ -40,5 +41,11 @@ export default {
           data: { content: 'Unsupported interaction type.' },
         });
     }
+  },
+
+  // Cron (wrangler.jsonc → triggers.crons): the weekly digest. Cheap enough for
+  // the Free plan — a few D1 reads and one POST per configured guild.
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(postWeeklyDigests(env, Math.floor(event.scheduledTime / 1000)));
   },
 } satisfies ExportedHandler<Env>;

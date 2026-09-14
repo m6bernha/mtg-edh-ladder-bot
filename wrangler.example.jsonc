@@ -17,6 +17,8 @@
 
   // Streams logs to the Cloudflare dashboard. `npm run tail` also works.
   "observability": { "enabled": true },
+  // Weekly digest (see /config digest-channel). Mondays 18:00 UTC.
+  "triggers": { "crons": ["0 18 * * 1"] },
 
   "d1_databases": [
     {

@@ -11,7 +11,8 @@
     "tail": "wrangler tail",
     "doctor": "node scripts/doctor.mjs",
     "sync-commanders": "node scripts/sync-commanders.mjs",
-    "backfill-commanders": "node scripts/backfill-commanders.mjs"
+    "backfill-commanders": "node scripts/backfill-commanders.mjs",
+    "recompute-ratings": "node scripts/recompute-ratings.mjs"
   },
   "dependencies": {
     "discord-interactions": "^4.4.0",

@@ -87,6 +87,8 @@ describe('restoreFromSnapshots', () => {
     mu_after: mu + 1,
     sigma_before: sigma,
     sigma_after: sigma - 0.5,
+    sigma_rusted: null,
+    rust_days: null,
   });
 
   it('returns the pre-game values for every player', () => {

@@ -1,4 +1,5 @@
 import { Rating, TrueSkill } from 'ts-trueskill';
+import { RATING } from './config.ts';
 
 export interface TSRating {
   mu: number;
@@ -10,12 +11,19 @@ export interface TSOptions {
   draw?: boolean;
 }
 
+/** One environment for every call — tau and the draw prior live in config.ts. */
+export function ratingEnv(): TrueSkill {
+  return new TrueSkill(RATING.MU0, RATING.SIGMA0, RATING.BETA, RATING.TAU, RATING.DRAW_PROBABILITY);
+}
+
 /**
  * TrueSkill update for a free-for-all pod: each player is their own rating
  * group; ranks mirror placements (lower = better, equal = tie).
  *
  * - draw: everyone gets the same rank.
  * - winnerOnly: ranks [0, 1, 1, ...] — 1st vs everyone-else-tied.
+ *
+ * Output sigma is floored at SIGMA_MIN so a rating can never freeze solid.
  */
 export function computeTrueSkill(
   ratings: TSRating[],
@@ -25,7 +33,7 @@ export function computeTrueSkill(
   if (ratings.length !== placements.length) {
     throw new Error('ratings/placements length mismatch');
   }
-  const env = new TrueSkill(); // defaults: mu 25, sigma 25/3
+  const env = ratingEnv();
   let ranks: number[];
   if (opts.draw) ranks = ratings.map(() => 0);
   else if (opts.winnerOnly) ranks = placements.map((p) => (p === 1 ? 0 : 1));
@@ -48,25 +56,18 @@ export function computeTrueSkill(
 
   const out = new Array<TSRating>(ratings.length);
   order.forEach((origIdx, pos) => {
-    out[origIdx] = { mu: rated[pos][0].mu, sigma: rated[pos][0].sigma };
+    out[origIdx] = { mu: rated[pos][0].mu, sigma: Math.max(RATING.SIGMA_MIN, rated[pos][0].sigma) };
   });
   return out;
 }
 
-// mu - 3*sigma is TrueSkill's conservative skill estimate: the rating we are
-// ~99.7% confident the player exceeds. It lives on a roughly 0-50 scale, which
-// reads as meaningless to players, so we stretch it into FaceIt-like territory.
-// SCALE widens the visible gap between skill levels; OFFSET lifts a fresh
-// player (mu 25, sigma 25/3) off zero to a recognisable starting number.
-const SR_SCALE = 40;
-const SR_OFFSET = 500;
-
 /**
- * FaceIt-feeling display number from the conservative TrueSkill estimate.
+ * FaceIt-feeling display number from the conservative TrueSkill estimate
+ * (mu − 3·sigma: the rating we are ~99.7% confident the player exceeds).
  * Fresh players start around 500 and climb as sigma shrinks — early games move
  * SR fast because the system is still resolving uncertainty, not because the
  * player improved.
  */
 export function skillRating(mu: number, sigma: number): number {
-  return Math.max(0, Math.round((mu - 3 * sigma) * SR_SCALE + SR_OFFSET));
+  return Math.max(0, Math.round((mu - 3 * sigma) * RATING.SR_SCALE + RATING.SR_OFFSET));
 }

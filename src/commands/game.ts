@@ -1,16 +1,13 @@
-import { computeTrueSkill } from '../ratings/trueskill';
 import {
   cancelGame,
-  completeGame,
   createGame,
   getActiveGame,
   getActiveOrLatestGame,
   getRoster,
   setBracket,
   upsertPlayers,
-  type CompletionEntry,
 } from '../db/queries';
-import { bracketLabel, errorMessage, successMessage } from '../discord/embeds';
+import { bracketLabel, errorMessage, shoutoutsEmbed, successMessage } from '../discord/embeds';
 import { matchState, renderMatchCard } from '../discord/card';
 import { updateLiveCard } from '../discord/live-card';
 import {
@@ -23,12 +20,8 @@ import {
   requireGuildChannel,
   resolvedUser,
 } from '../discord/options';
-import {
-  isPlayerOrAdmin,
-  validateReport,
-  validateStart,
-  type PlacementInput,
-} from '../validation';
+import { reportGame } from '../services/report.ts';
+import { isPlayerOrAdmin, validateStart, type PlacementInput } from '../validation';
 import type { Env, GameRow, Interaction, MessageData, RosterEntry } from '../types';
 
 const PLAYER_SLOTS = ['player1', 'player2', 'player3', 'player4', 'player5', 'player6'];
@@ -87,6 +80,7 @@ export async function handleGameStart(i: Interaction, env: Env): Promise<Message
     created_by: invoker(i).id,
     reported_by: null,
     message_id: null,
+    top_player_id: null,
   };
   const roster: RosterEntry[] = ids.map((id) => {
     const p = players.get(id)!;
@@ -100,6 +94,8 @@ export async function handleGameStart(i: Interaction, env: Env): Promise<Message
       mu_after: null,
       sigma_before: null,
       sigma_after: null,
+      sigma_rusted: null,
+      rust_days: null,
       discord_user_id: id,
       username: p.username,
       ts_mu: p.ts_mu,
@@ -116,67 +112,31 @@ export async function handleGameReport(i: Interaction, env: Env): Promise<Messag
   const sub = getSub(i);
   if (!sub) return errorMessage('Missing subcommand.');
 
-  const active = await getActiveGame(env.DB, guildId, channelId);
-  if (!active) {
-    return errorMessage('No active game in this channel. Start one with `/game start`.');
-  }
-  const roster = await getRoster(env.DB, active.id);
-  const rosterIds = roster.map((r) => r.discord_user_id);
-  const me = invoker(i);
-  if (!isPlayerOrAdmin(roster, me.id, i.member?.permissions)) {
-    return errorMessage('Only players in this game (or admins) can report it.');
-  }
-
   const placements: PlacementInput[] = [];
   PLACE_SLOTS.forEach((name, idx) => {
     const v = optString(sub.options, name);
     if (v) placements.push({ userId: v, place: idx + 1 });
   });
-  const draw = optBoolean(sub.options, 'draw') ?? false;
-  const winnerOnly = optBoolean(sub.options, 'winner_only') ?? false;
-  const val = validateReport(rosterIds, placements, { draw, winnerOnly });
-  if (!val.ok) return errorMessage(val.error);
+  const me = invoker(i);
+  const outcome = await reportGame(env, {
+    guildId,
+    channelId,
+    reporterId: me.id,
+    reporterPermissions: i.member?.permissions,
+    placements,
+    draw: optBoolean(sub.options, 'draw') ?? false,
+    winnerOnly: optBoolean(sub.options, 'winner_only') ?? false,
+  });
+  if (!outcome.ok) return errorMessage(outcome.error);
 
-  const byId = new Map(roster.map((r) => [r.discord_user_id, r]));
-  const ordered = [...placements].sort((a, b) => a.place - b.place).map((p) => byId.get(p.userId)!);
-  const places = ordered.map((_, idx) => idx + 1);
-  const newTs = computeTrueSkill(
-    ordered.map((r) => ({ mu: r.ts_mu, sigma: r.ts_sigma })),
-    places,
-    { draw, winnerOnly },
-  );
-
-  const entries: CompletionEntry[] = ordered.map((r, idx) => ({
-    playerId: r.player_id,
-    placement: draw ? 1 : idx + 1, // a draw is everyone tied for 1st
-    muBefore: r.ts_mu,
-    muAfter: newTs[idx].mu,
-    sigmaBefore: r.ts_sigma,
-    sigmaAfter: newTs[idx].sigma,
-  }));
-  const endedAt = await completeGame(env.DB, active.id, { winnerOnly, draw }, me.id, entries);
-
-  const game: GameRow = {
-    ...active,
-    status: 'completed',
-    ended_at: endedAt,
-    winner_only: winnerOnly ? 1 : 0,
-    draw: draw ? 1 : 0,
-  };
-  const finalRoster: RosterEntry[] = ordered.map((r, idx) => ({
-    ...r,
-    placement: draw ? 1 : idx + 1,
-    mu_before: r.ts_mu,
-    sigma_before: r.ts_sigma,
-    mu_after: newTs[idx].mu,
-    sigma_after: newTs[idx].sigma,
-  }));
   // Best-effort: edit the original card to completed so its live timer stops and
   // it reflects the result up-thread (needs channel perms). The result itself is
   // this command's PUBLIC reply — an interaction response, so the whole pod sees
   // it even when the bot can't edit the original card.
-  await updateLiveCard(env, game);
-  return renderMatchCard(matchState(game, finalRoster));
+  await updateLiveCard(env, outcome.game);
+  const reply = renderMatchCard(matchState(outcome.game, outcome.roster));
+  if (outcome.shoutouts.length) reply.embeds!.push(shoutoutsEmbed(outcome.shoutouts));
+  return reply;
 }
 
 export async function handleGameBracket(i: Interaction, env: Env): Promise<MessageData> {
