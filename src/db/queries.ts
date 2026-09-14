@@ -164,6 +164,12 @@ export interface CompletionEntry {
  * Atomically complete a game: game row + snapshots + player ratings.
  * `endedAt` may be supplied (the recompute replay passes the historical value);
  * live reports use the current time.
+ *
+ * Race-safe: two reporters can reach this at once (the card's Confirm button
+ * makes that a one-click event). The game row flips only while still active,
+ * and every other write in the batch is conditional on the row now carrying
+ * THIS attempt's ended_at/reporter — so the loser writes nothing at all rather
+ * than overwriting the winner's ratings. Returns false for the loser.
  */
 export async function completeGame(
   db: D1Database,
@@ -172,7 +178,8 @@ export async function completeGame(
   reportedBy: string,
   entries: CompletionEntry[],
   endedAt: number = now(),
-): Promise<number> {
+): Promise<boolean> {
+  const mine = `EXISTS (SELECT 1 FROM games WHERE id = ? AND status = 'completed' AND ended_at = ? AND reported_by = ?)`;
   const stmts: D1PreparedStatement[] = [
     db
       .prepare(
@@ -189,7 +196,7 @@ export async function completeGame(
           `UPDATE game_players SET placement = ?,
              mu_before = ?, mu_after = ?, sigma_before = ?, sigma_after = ?,
              sigma_rusted = ?, rust_days = ?
-           WHERE game_id = ? AND player_id = ?`,
+           WHERE game_id = ? AND player_id = ? AND ${mine}`,
         )
         .bind(
           e.placement,
@@ -201,14 +208,17 @@ export async function completeGame(
           e.rustDays,
           gameId,
           e.playerId,
+          gameId,
+          endedAt,
+          reportedBy,
         ),
       db
-        .prepare('UPDATE players SET ts_mu = ?, ts_sigma = ? WHERE id = ?')
-        .bind(e.muAfter, e.sigmaAfter, e.playerId),
+        .prepare(`UPDATE players SET ts_mu = ?, ts_sigma = ? WHERE id = ? AND ${mine}`)
+        .bind(e.muAfter, e.sigmaAfter, e.playerId, gameId, endedAt, reportedBy),
     );
   }
-  await db.batch(stmts);
-  return endedAt;
+  const results = await db.batch(stmts);
+  return (results[0]?.meta?.changes ?? 0) > 0;
 }
 
 /**
@@ -330,6 +340,7 @@ export async function getLeaderboardCount(db: D1Database, guildId: string): Prom
 
 export interface RecentResultRow {
   player_id: number;
+  game_id: number;
   rn: number; // 1 = newest
   placement: number | null;
   draw: number;
@@ -345,8 +356,8 @@ export interface RecentResultRow {
 export async function getRecentResults(db: D1Database, guildId: string, n: number): Promise<RecentResultRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT player_id, rn, placement, draw, mu_before, sigma_before FROM (
-         SELECT gp.player_id, gp.placement, g.draw, gp.mu_before, gp.sigma_before,
+      `SELECT player_id, game_id, rn, placement, draw, mu_before, sigma_before FROM (
+         SELECT gp.player_id, gp.game_id, gp.placement, g.draw, gp.mu_before, gp.sigma_before,
                 ROW_NUMBER() OVER (PARTITION BY gp.player_id ORDER BY g.ended_at DESC, g.id DESC) AS rn
          FROM game_players gp JOIN games g ON g.id = gp.game_id
          WHERE g.guild_id = ? AND g.status = 'completed')
@@ -729,8 +740,8 @@ export async function getRivals(db: D1Database, playerId: number): Promise<Rival
   const { results } = await db
     .prepare(
       `SELECT o.player_id AS opponent_id, p.username, COUNT(*) AS shared,
-              SUM(CASE WHEN g.draw = 0 AND o.placement < me.placement THEN 1 ELSE 0 END) AS above_me,
-              SUM(CASE WHEN g.draw = 0 AND me.placement < o.placement THEN 1 ELSE 0 END) AS below_me
+              SUM(CASE WHEN g.draw = 0 AND (g.winner_only = 0 OR o.placement = 1) AND o.placement < me.placement THEN 1 ELSE 0 END) AS above_me,
+              SUM(CASE WHEN g.draw = 0 AND (g.winner_only = 0 OR me.placement = 1) AND me.placement < o.placement THEN 1 ELSE 0 END) AS below_me
        FROM game_players me
        JOIN game_players o ON o.game_id = me.game_id AND o.player_id <> me.player_id
        JOIN games g ON g.id = me.game_id AND g.status = 'completed'

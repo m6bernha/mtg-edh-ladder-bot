@@ -179,7 +179,8 @@ async function sendReply(i: Interaction, ctx: ExecutionContext, reply: Component
     case 'update':
       return json({ type: ResponseType.UPDATE_MESSAGE, data: withV2(reply.data) });
     case 'reply': {
-      const data = withV2(reply.data);
+      // Copy: handlers may hand back a shared constant (STALE, noGuild).
+      const data = { ...withV2(reply.data) };
       if (reply.ephemeral) data.flags = (data.flags ?? 0) | EPHEMERAL;
       return json({ type: ResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data });
     }

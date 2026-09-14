@@ -95,7 +95,8 @@ export async function reportGame(env: Env, req: ReportRequest): Promise<ReportOu
     sigmaRusted: x.sigmaRusted,
     rustDays: x.rustDays,
   }));
-  await completeGame(env.DB, active.id, { winnerOnly: req.winnerOnly, draw: req.draw, topPlayerId }, req.reporterId, entries, endedAt);
+  const won = await completeGame(env.DB, active.id, { winnerOnly: req.winnerOnly, draw: req.draw, topPlayerId }, req.reporterId, entries, endedAt);
+  if (!won) return { ok: false, error: 'Someone already reported this game — check the card.' };
 
   const game: GameRow = {
     ...active,

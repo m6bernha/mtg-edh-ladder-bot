@@ -37,13 +37,18 @@ export async function patchOriginal(
   token: string,
   data: MessageData,
 ): Promise<void> {
-  const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`, {
-    method: 'PATCH',
-    headers: JSON_HEADERS,
-    body: JSON.stringify(withV2(data)),
-  });
-  if (!res.ok) {
-    console.error(`patchOriginal failed: ${res.status} ${await res.text()}`);
+  try {
+    const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(withV2(data)),
+    });
+    if (!res.ok) {
+      console.error(`patchOriginal failed: ${res.status} ${await res.text()}`);
+    }
+  } catch (e) {
+    // A thrown fetch inside waitUntil would otherwise leave the user on the spinner.
+    console.error('patchOriginal threw:', e);
   }
 }
 
@@ -53,13 +58,17 @@ export async function patchOriginal(
  * flow's result must reach the whole pod but the live card could not be edited.
  */
 export async function followUp(applicationId: string, token: string, data: MessageData): Promise<void> {
-  const res = await fetch(`${API}/webhooks/${applicationId}/${token}`, {
-    method: 'POST',
-    headers: JSON_HEADERS,
-    body: JSON.stringify(withV2(data)),
-  });
-  if (!res.ok) {
-    console.error(`followUp failed: ${res.status} ${await res.text()}`);
+  try {
+    const res = await fetch(`${API}/webhooks/${applicationId}/${token}`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(withV2(data)),
+    });
+    if (!res.ok) {
+      console.error(`followUp failed: ${res.status} ${await res.text()}`);
+    }
+  } catch (e) {
+    console.error('followUp threw:', e);
   }
 }
 

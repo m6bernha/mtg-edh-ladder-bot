@@ -46,6 +46,14 @@ async function mySeat(i: Interaction, env: Env, args: string[]): Promise<{ ok: t
   if (!found.ok) return found;
   const mine = found.roster.find((r) => r.discord_user_id === invoker(i).id);
   if (!mine) return { ok: false, reply: ephemeral(errorV2("You're not in this game's pod — only players can set their own commander.")) };
+  // A per-row Set button names a seat; it must be the clicker's own.
+  const idx = intArg(args, 1);
+  if (idx !== null) {
+    const seatRow = found.roster[idx];
+    if (seatRow && seatRow.discord_user_id !== invoker(i).id) {
+      return { ok: false, reply: ephemeral(errorV2(`That's **${seatRow.username}**'s seat — only they can set it. Use the **Set commander** button for yours.`)) };
+    }
+  }
   return { ok: true, seat: { game: found.game, roster: found.roster, mine } };
 }
 

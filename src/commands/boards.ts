@@ -46,24 +46,34 @@ export async function loadLeaderboardView(db: D1Database, guildId: string, page:
     getRecentResults(db, guildId, RECENT_FORM_GAMES),
   ]);
 
-  // Rank before each player's newest game: rank the whole guild by the SR it
-  // held then (everyone else's current SR stands in — the exact answer would
-  // need a full replay; this is the movement a player actually experienced).
+  // Rank before each player's newest game. Everyone who sat in that same game
+  // is ranked by the SR they held before it (their own snapshot), everyone else
+  // by their current SR — so an overtake inside the pod, which is where almost
+  // all movement happens, shows exactly; movement caused by other pods' games
+  // since then is approximated.
   const byPlayer = new Map<number, typeof recent>();
   for (const r of recent) {
     const list = byPlayer.get(r.player_id) ?? [];
     list.push(r);
     byPlayer.set(r.player_id, list);
   }
-  const currentSr = new Map<number, number>();
-  const allRows = total <= LEADERBOARD_PAGE_SIZE ? rows : await getLeaderboard(db, guildId, total, 0);
-  for (const r of allRows) currentSr.set(r.id, skillRating(r.ts_mu, r.ts_sigma));
+  const board = await getGuildBoard(db, guildId);
+  const currentSr = new Map(board.map((b) => [b.playerId, skillRating(b.mu, b.sigma)]));
+  const newestOf = (playerId: number) => byPlayer.get(playerId)?.find((r) => r.rn === 1);
   const previousRank = (playerId: number): number | null => {
-    const newest = byPlayer.get(playerId)?.find((r) => r.rn === 1);
+    const newest = newestOf(playerId);
     if (!newest || newest.mu_before == null || newest.sigma_before == null) return null;
     const mySr = skillRating(newest.mu_before, newest.sigma_before);
     let above = 0;
-    for (const [id, sr] of currentSr) if (id !== playerId && sr > mySr) above++;
+    for (const [id, sr] of currentSr) {
+      if (id === playerId) continue;
+      const theirs = newestOf(id);
+      const srThen =
+        theirs && theirs.game_id === newest.game_id && theirs.mu_before != null && theirs.sigma_before != null
+          ? skillRating(theirs.mu_before, theirs.sigma_before)
+          : sr;
+      if (srThen > mySr) above++;
+    }
     return above + 1;
   };
 
