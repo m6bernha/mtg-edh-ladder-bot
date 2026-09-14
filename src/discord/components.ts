@@ -163,7 +163,7 @@ export function button(
   return {
     type: 2,
     style,
-    label,
+    ...(label ? { label } : {}),
     custom_id: customId,
     ...(opts.emoji ? { emoji: { name: opts.emoji } } : {}),
     ...(opts.disabled ? { disabled: true } : {}),

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadLeaderboardView } from '../src/commands/boards';
 import { updateLiveCard } from '../src/discord/live-card';
-import { routeComponent } from '../src/router';
+import { routeComponent, routeModal } from '../src/router';
 import type { Env, GameRow, Interaction, RosterEntry } from '../src/types';
 import { fakeD1, type FakeRoute } from './helpers/fake-d1';
 
@@ -198,5 +198,49 @@ describe('updateLiveCard across the V2 switch', () => {
     expect((post!.body.flags as number) & (1 << 15)).toBe(1 << 15);
     expect(post!.body.allowed_mentions).toEqual({ parse: [] });
     expect(db.log.some((s) => s.includes('UPDATE games SET message_id'))).toBe(true);
+  });
+});
+
+describe('⚙️ settings flow', () => {
+  it('opens for a pod member with a bracket select and a seat select; refuses outsiders', async () => {
+    const { env: e } = env();
+    const ok = await body(await routeComponent(click('set:open:7'), e, ctx().ctx));
+    expect(ok.type).toBe(4);
+    const s = JSON.stringify(ok.data);
+    expect(s).toContain('set:bracket:7');
+    expect(s).toContain('set:seat:7');
+    expect(s).toContain('"value":"3"'); // a bracket option
+    const no = await body(await routeComponent(click('set:open:7', 'stranger'), e, ctx().ctx));
+    expect(JSON.stringify(no.data)).toContain('Only players in this game');
+  });
+
+  it('changing the bracket writes and edits the card', async () => {
+    const { db, env: e } = env([{ match: 'UPDATE games SET bracket', rows: [] }]);
+    const c = ctx();
+    const b = await body(await routeComponent(click('set:bracket:7', 'u1', { component_type: 3, values: ['4'] }), e, c.ctx));
+    expect(b.type).toBe(6);
+    await Promise.all(c.waits);
+    expect(db.log.some((s) => s.includes('UPDATE games SET bracket'))).toBe(true);
+    expect(calls().some((x) => x.url.includes('/channels/c/messages/m1'))).toBe(true);
+  });
+
+  it("picking a seat opens a modal titled for that player; submitting overwrites that seat", async () => {
+    const { db, env: e } = env([
+      { match: 'SELECT name, norm_name, short_name, norm_short, front_name, color_identity, edhrec_rank, partner_flags FROM commanders', rows: [{ name: 'Edgar Markov', norm_name: 'edgar markov', short_name: 'Edgar Markov', norm_short: 'edgar markov', front_name: null, color_identity: 'WBR', edhrec_rank: 1, partner_flags: 0 }] },
+      { match: 'WHERE name = ?', first: { oracle_id: 'o', name: 'Edgar Markov', norm_name: 'edgar markov', short_name: 'Edgar Markov', norm_short: 'edgar markov', front_name: null, color_identity: 'WBR', type_line: null, edhrec_rank: 1, art_crop: 'https://img/e', image_normal: null, partner_flags: 0 } },
+      { match: 'UPDATE game_players SET commander', rows: [] },
+    ]);
+    const m = await body(await routeComponent(click('set:seat:7', 'u1', { component_type: 3, values: ['2'] }), e, ctx().ctx));
+    expect(m.type).toBe(9);
+    expect(m.data!.custom_id).toBe('set:modal:7:2');
+    expect(m.data!.title).toContain('Cy');
+    const c = ctx();
+    const submit: Interaction = { ...click('set:modal:7:2'), type: 5, data: { name: '', custom_id: 'set:modal:7:2', components: [{ type: 18, component: { type: 4, custom_id: 'q', value: 'edgar markov' } }] } };
+    const r = await body(await routeModal(submit, e, c.ctx));
+    expect(r.type).toBe(5);
+    await Promise.all(c.waits);
+    expect(db.log.some((s) => s.includes('UPDATE game_players SET commander'))).toBe(true);
+    const note = calls().find((x) => x.url.includes('@original'))!;
+    expect(JSON.stringify(note.body)).toContain('**Cy** → **Edgar Markov**');
   });
 });

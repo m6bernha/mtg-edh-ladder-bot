@@ -10,7 +10,6 @@ import {
   sep,
   text,
   thumb,
-  type Button,
   type ContainerChild,
 } from './components.ts';
 import { encodeId } from './custom-id.ts';
@@ -122,7 +121,7 @@ function metaLine(s: MatchCardState): string {
 }
 
 function footer(s: MatchCardState): string {
-  if (s.phase === 'active') return '-# Buttons work for anyone in the pod · or `/commander`, `/game report`, `/game cancel`';
+  if (s.phase === 'active') return '-# Buttons work for anyone in the pod · ⚙️ fixes the bracket or a seat · or `/commander`, `/game report`';
   if (s.phase === 'completed') return '-# Wrong result? `/undo` · Full profile: `/stats`';
   return '-# Nothing counts — start fresh with `/game start`';
 }
@@ -157,10 +156,10 @@ function playerLine(p: CardPlayer, s: MatchCardState, idx: number): string {
 // ---- Buttons ----
 
 export const CardButtons = {
-  setCommander: (gameId: number, idx?: number) =>
-    idx === undefined ? encodeId('cmd', 'open', gameId) : encodeId('cmd', 'open', gameId, idx),
+  setCommander: (gameId: number) => encodeId('cmd', 'open', gameId),
   report: (gameId: number) => encodeId('rep', 'open', gameId),
   cancel: (gameId: number) => encodeId('cxl', 'ask', gameId),
+  settings: (gameId: number) => encodeId('set', 'open', gameId),
 } as const;
 
 function actionRow(s: MatchCardState) {
@@ -168,6 +167,7 @@ function actionRow(s: MatchCardState) {
     button(ButtonStyle.PRIMARY, 'Set commander', CardButtons.setCommander(s.gameId), { emoji: '🧙' }),
     button(ButtonStyle.SUCCESS, 'Report result', CardButtons.report(s.gameId), { emoji: '🏁' }),
     button(ButtonStyle.DANGER, 'Cancel game', CardButtons.cancel(s.gameId), { emoji: '🗑️' }),
+    button(ButtonStyle.SECONDARY, '', CardButtons.settings(s.gameId), { emoji: '⚙️' }),
   );
 }
 
@@ -195,14 +195,8 @@ export function renderMatchCard(s: MatchCardState): MessageData {
 
   ordered.forEach((p, idx) => {
     const line = text(playerLine(p, s, idx));
-    if (p.commanderImage) {
-      children.push(section(thumb(p.commanderImage, p.commander ?? undefined), line));
-    } else if (s.phase === 'active') {
-      const set: Button = button(ButtonStyle.SECONDARY, 'Set', CardButtons.setCommander(s.gameId, idx));
-      children.push(section(set, line));
-    } else {
-      children.push(line);
-    }
+    // Art as a thumbnail accessory; no art → plain text (a Section needs an accessory).
+    children.push(p.commanderImage ? section(thumb(p.commanderImage, p.commander ?? undefined), line) : line);
   });
 
   if (s.phase === 'active') {

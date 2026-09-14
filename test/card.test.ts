@@ -101,20 +101,14 @@ describe('renderMatchCard — active phase', () => {
     expect(allText(card)).toContain('<t:1000:R>');
   });
 
-  it('one section per player, with a Set button (no thumbnail) when no art is logged', () => {
-    const secs = sections(card);
-    expect(secs).toHaveLength(2);
-    expect(secs[0].accessory.type).toBe(2);
+  it('players without art are plain text lines, not sections with buttons', () => {
+    expect(sections(card)).toHaveLength(0);
     expect(allText(card)).toMatch(/No commander logged yet/);
   });
 
-  it('carries the three action buttons with well-formed ids', () => {
+  it('carries exactly four action buttons (set, report, cancel, settings) with well-formed ids', () => {
     const ids = customIds(card.components!);
-    expect(ids).toContain('cmd:open:42');
-    expect(ids).toContain('rep:open:42');
-    expect(ids).toContain('cxl:ask:42');
-    expect(ids).toContain('cmd:open:42:0');
-    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['cmd:open:42', 'rep:open:42', 'cxl:ask:42', 'set:open:42']);
     expect(rows(card)).toHaveLength(1);
   });
 });
@@ -126,10 +120,10 @@ describe('renderMatchCard — commander artwork', () => {
       player({ player_id: 2, discord_user_id: 'd2', username: 'Bob' }),
     ]);
     const card = renderMatchCard(s);
-    const [a, b] = sections(card);
-    expect(a.accessory).toEqual({ type: 11, media: { url: 'https://img/a' }, description: 'Atraxa' });
-    expect(a.components[0].content).toContain('Atraxa');
-    expect(b.accessory.type).toBe(2);
+    const secs = sections(card);
+    expect(secs).toHaveLength(1);
+    expect(secs[0].accessory).toEqual({ type: 11, media: { url: 'https://img/a' }, description: 'Atraxa' });
+    expect(secs[0].components[0].content).toContain('Atraxa');
   });
 });
 

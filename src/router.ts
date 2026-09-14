@@ -21,6 +21,7 @@ import { cancelFlow } from './flows/cancel.ts';
 import { commanderFlow } from './flows/commander.ts';
 import { pageFlow } from './flows/pages.ts';
 import { reportFlow } from './flows/report.ts';
+import { settingsFlow } from './flows/settings.ts';
 import { errorV2 } from './flows/shared.ts';
 import type { ComponentHandler, ComponentReply } from './flows/types.ts';
 import { EPHEMERAL, ResponseType, type Env, type Interaction, type MessageData } from './types';
@@ -164,12 +165,14 @@ const COMPONENTS: Record<string, ComponentHandler> = {
   ...cancelFlow,
   ...commanderFlow,
   ...reportFlow,
+  ...settingsFlow,
   ...pageFlow,
 };
 
 /** Modal submits share the cmd:* handlers; only cmd:modal is a modal today. */
 const MODALS: Record<string, ComponentHandler> = {
   'cmd:modal': commanderFlow['cmd:modal'],
+  'set:modal': settingsFlow['set:modal'],
 };
 
 const STALE = errorV2('That button is from an older card.');
