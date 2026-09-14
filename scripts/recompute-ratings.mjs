@@ -30,31 +30,45 @@ const apply = args.has('--apply');
 const dir = mkdtempSync(join(tmpdir(), 'edh-recompute-'));
 process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
 let fileNo = 0;
-function d1(sql) {
-  const file = join(dir, `q-${++fileNo}.sql`);
-  writeFileSync(file, sql + NL);
-  const out = execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --json --file "${file}"`, {
+/**
+ * Reads go through --command: against a remote database, --file runs as an
+ * import and returns only statistics, not rows. The SQL here is fixed text
+ * (no user input) and contains no double quotes, so it is shell-safe as is.
+ */
+function query(sql) {
+  if (sql.includes('"')) throw new Error('read queries must not contain double quotes');
+  const out = execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --json --command "${sql.replace(/\s+/g, ' ').trim()}"`, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   return JSON.parse(out.slice(out.indexOf('[')))[0].results;
 }
-const activeCount = () => d1("SELECT COUNT(*) AS n FROM games WHERE status = 'active'")[0].n;
+
+/** Writes go through --file (no shell quoting, any size). */
+function d1(sql) {
+  const file = join(dir, `q-${++fileNo}.sql`);
+  writeFileSync(file, sql + NL);
+  execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --file "${file}"`, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+}
+const activeCount = () => query("SELECT COUNT(*) AS n FROM games WHERE status = 'active'")[0].n;
 
 // ---- Read ----
 if (activeCount() > 0) {
   console.error('A game is active — finish or cancel it first, then re-run.');
   process.exit(1);
 }
-const games = d1(
+const games = query(
   "SELECT id, guild_id, ended_at, draw, winner_only FROM games WHERE status = 'completed' ORDER BY ended_at, id",
 );
-const seats = d1(
+const seats = query(
   `SELECT gp.game_id, gp.player_id, gp.placement, gp.mu_after, gp.sigma_after, p.username
    FROM game_players gp JOIN players p ON p.id = gp.player_id
    JOIN games g ON g.id = gp.game_id WHERE g.status = 'completed'`,
 );
-const players = d1('SELECT id, guild_id, username, ts_mu, ts_sigma FROM players');
+const players = query('SELECT id, guild_id, username, ts_mu, ts_sigma FROM players');
 console.log(`Replaying ${games.length} completed games, ${seats.length} seats, ${players.length} players (${target})${apply ? '' : ' [dry run]'}`);
 
 // ---- Replay ----
