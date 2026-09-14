@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every PR, whatever its base — stacked PRs need checks before their base lands.
   pull_request:
-    branches: [main]
 
 # Cancel superseded runs on the same branch instead of queueing them.
 concurrency:

@@ -28,3 +28,6 @@ wrangler.jsonc
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# Local D1 exports taken by recompute-ratings / before migrations
+backups/
