@@ -1,5 +1,5 @@
 import { InteractionType } from '../types';
-import type { DiscordUser, Interaction, InteractionOption } from '../types';
+import type { DiscordUser, Interaction, InteractionOption, ModalResponseComponent } from '../types';
 
 /**
  * Runtime shape check for the Discord payload. The body is Ed25519-verified
@@ -16,16 +16,19 @@ export function parseInteraction(body: unknown): Interaction | null {
   const i = body as Record<string, unknown>;
   if (typeof i.type !== 'number') return null;
 
-  const needsResponse =
+  const isCommand =
     i.type === InteractionType.APPLICATION_COMMAND ||
     i.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE;
+  const isComponent = i.type === InteractionType.MESSAGE_COMPONENT || i.type === InteractionType.MODAL_SUBMIT;
 
-  if (needsResponse) {
-    // Deferred replies are delivered by webhook, which needs both of these,
-    // and every handler dispatches on data.name.
+  if (isCommand || isComponent) {
+    // Deferred replies are delivered by webhook, which needs both of these.
     if (typeof i.token !== 'string' || typeof i.application_id !== 'string') return null;
     if (typeof i.data !== 'object' || i.data === null) return null;
-    if (typeof (i.data as Record<string, unknown>).name !== 'string') return null;
+    const data = i.data as Record<string, unknown>;
+    // Commands dispatch on data.name; components and modals on data.custom_id.
+    if (isCommand && typeof data.name !== 'string') return null;
+    if (isComponent && typeof data.custom_id !== 'string') return null;
   }
 
   return i as unknown as Interaction;
@@ -106,4 +109,34 @@ export function collectUsers(options: InteractionOption[], names: string[]): str
     if (v) out.push(v);
   }
   return out;
+}
+
+/** The custom_id of the button/select/modal that produced this interaction. */
+export function customId(i: Interaction): string | undefined {
+  return i.data?.custom_id;
+}
+
+/** Chosen values of a select-menu interaction (empty when none). */
+export function selectValues(i: Interaction): string[] {
+  return Array.isArray(i.data?.values) ? i.data!.values!.filter((v) => typeof v === 'string') : [];
+}
+
+/**
+ * Value of one modal field by custom_id. Walks both the Label shape
+ * (`{type:18, component:{…}}`) and the legacy Action Row shape
+ * (`{type:1, components:[…]}`); selects yield their first chosen value.
+ */
+export function modalValue(i: Interaction, id: string): string | undefined {
+  const stack: ModalResponseComponent[] = [...(i.data?.components ?? [])];
+  while (stack.length) {
+    const c = stack.pop()!;
+    if (c.custom_id === id) {
+      if (typeof c.value === 'string') return c.value;
+      if (Array.isArray(c.values) && typeof c.values[0] === 'string') return c.values[0];
+      return undefined;
+    }
+    if (c.component) stack.push(c.component);
+    if (c.components) stack.push(...c.components);
+  }
+  return undefined;
 }

@@ -137,9 +137,13 @@ The flow, in `src/discord/`:
    the card, and edits the stored message with the bot token.
 3. `renderMatchCard` (`card.ts`) is a **pure** function of a `MatchCardState` — phase,
    players, bracket, timings. That keeps the whole visual layer unit-testable with no
-   database or network. A header embed carries pod size, bracket and a `<t:…:R>` relative
+   database or network. The card is built on Discord's **Components V2** (see below): one
+   Container with an accent bar; a header carrying the pod pings and a `<t:…:R>` relative
    timestamp — a live-ticking timer Discord updates client-side with zero edits from us —
-   and one compact embed per player carries their commander art as a thumbnail.
+   then one Section per player with their commander art as a thumbnail (or a **Set**
+   button while no deck is logged), and a row of **Set commander / Report result / Cancel
+   game** buttons. The completed card leads with the winner's art in a media gallery,
+   medals, SR deltas and rust notes, and has no buttons.
 
 **Every step degrades gracefully.** If the id capture in step 1 loses a race to a very fast
 `/commander`, or the card was deleted, or the bot lost channel access, `updateLiveCard`
@@ -159,6 +163,49 @@ fault was a rejected token. The other tell is that everything *else* keeps worki
 start card, the `/game report` card and the ephemeral confirmations all go through the
 interaction webhook and never touch the bot token, so a bot whose token is dead looks
 healthy right up until the first live-card edit.
+
+### Components V2 and the buttons
+
+Type numbers, limits and interaction rules were verified against
+[docs.discord.com/developers/components/reference](https://docs.discord.com/developers/components/reference)
+and [receiving-and-responding](https://docs.discord.com/developers/interactions/receiving-and-responding)
+on 2026-09-13 and are encoded once in `src/discord/components.ts`. The rules that shape the
+code:
+
+- A V2 message carries the `IS_COMPONENTS_V2` flag (`1 << 15`), **cannot** carry `content` or
+  `embeds`, and the flag **cannot be removed** once a message has it. `withV2()` in
+  `src/discord/api.ts` is the single place the flag is set — every send/edit passes through
+  it, and it throws if a message mixes the two worlds, so that class of bug is a test
+  failure rather than a Discord 400. Plain confirmations and errors stay classic embeds.
+- A deferred acknowledgement (type 5) may carry only the `EPHEMERAL` flag; the V2 payload
+  goes on the follow-up edit. Type 4 may carry V2 directly, which is why `/game start`'s
+  inline reply (the one that pings) still works unchanged.
+- Limits: 40 components per message, 4,000 characters per text display, 100-character
+  custom ids, 25 select options, 5 buttons per row, 1–5 components per modal. A six-player
+  card is 28 components; tests assert every phase × pod size stays under the caps.
+
+**Buttons hold no state.** Every custom id follows `<ns>:<verb>:<gameId>[:args]`
+(`src/discord/custom-id.ts`), and everything a click needs is either in the id or re-read
+from the database. The report flow is the interesting case: the draft — mode (full /
+winner-only / draw) plus the picks so far as roster indices — travels inside the id
+(`rep:pick:42:f:2-0`), so there is no drafts table, no TTL, no cross-player collision, and
+a six-player full report is a 32-character id. Roster indices are stable because `getRoster`
+orders by player id. Every step re-checks that the game is still the channel's active one
+(a click on a stale card is refused, never acted on) and that the clicker is in the pod or
+an admin; the final Confirm goes through the same `reportGame()` service as `/game report`,
+so the two paths cannot drift.
+
+**Setting a commander from the card** offers the player's recent decks first (one click),
+then a search modal. A typo or a shared short name lands on a "did you mean" select rather
+than being guessed. Only the player's own seat can be set — the same rule as `/commander`,
+so an admin is not offered a seat they never sat in. The modal has no select menu in it:
+modal selects are the least-settled part of the spec, and the ephemeral picker covers the
+need with primitives that are certain.
+
+**Responding within three seconds.** Picking steps answer with `UPDATE_MESSAGE` (type 7)
+inline — one indexed read and a pure render. Anything that writes and then edits the live
+card defers (type 6 or 5) and finishes in `ctx.waitUntil`, editing `@original` — which for a
+component interaction is the message the component sits on.
 
 **Every Discord API call must send a `DiscordBot (...)` User-Agent.** Discord sits behind
 Cloudflare, whose WAF silently rejects bot-authenticated REST calls without one — as bare
@@ -396,9 +443,9 @@ race detection. For a bot where a pod reports one game at a time in one channel,
 the better trade. Single-statement writes (`cancelGame`) *do* check their row count and
 report honestly when they lose a race.
 
-**Partial pagination.** `/meta` and `/history` page; `/leaderboard` returns the top 20 and
-`/stats` reads a player's full history. Fine for a friend group; a server with thousands of
-games would want limits everywhere.
+**Pagination is by buttons, not cursors.** `/leaderboard`, `/meta` and `/history` page with
+◀ ▶ buttons carrying the page number; `/stats` reads a player's full history. Fine for a
+friend group; a server with thousands of games would want limits everywhere.
 
 **Minimal migrations.** `schema.sql` is idempotent DDL (`CREATE TABLE IF NOT EXISTS`) and
 represents the current shape, so a fresh install applies it and is done. Schema *changes* to
@@ -409,6 +456,11 @@ ordered files plus a one-line changelog per file is enough; a real runner is the
 step if the schema starts moving often.
 
 **Guild-only.** Every command requires server context; nothing works in DMs.
+
+**Cards posted before the Components V2 switch cannot be edited into the new shape.** The
+flag is one-way, so an edit to an old embed card 400s; `updateLiveCard` already reposts on
+any edit failure, so an in-flight game across the deploy gets a fresh card and the stale
+embed stays in the scrollback. Finish or cancel open games before deploying.
 
 **The weekly digest runs on a cron with no user in the loop.** Its failures are only
 visible in `wrangler tail`. A digest channel the bot can no longer post to (403/404) clears

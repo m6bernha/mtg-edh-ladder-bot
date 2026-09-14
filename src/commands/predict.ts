@@ -1,5 +1,6 @@
 import { getActiveGame, getLastPlayedAt, getRoster } from '../db/queries';
-import { errorMessage, predictMessage } from '../discord/embeds';
+import { predictMessage } from '../discord/boards.ts';
+import { errorMessage } from '../discord/embeds';
 import { requireGuildChannel } from '../discord/options';
 import { matchQuality, predictWinProbabilities } from '../ratings/predict.ts';
 import { applyRust } from '../ratings/rust.ts';

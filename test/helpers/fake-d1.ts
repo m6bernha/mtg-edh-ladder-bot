@@ -16,8 +16,9 @@ export interface FakeD1 extends D1Database {
   log: string[];
 }
 
-export function fakeD1(routes: FakeRoute[]): FakeD1 {
+export function fakeD1(routes: FakeRoute[], opts: { batchChanges?: number } = {}): FakeD1 {
   const log: string[] = [];
+  const batchChanges = opts.batchChanges ?? 1;
   const find = (sql: string) =>
     routes.find((r) => (typeof r.match === 'string' ? sql.includes(r.match) : r.match.test(sql)));
   const stmt = (sql: string): D1PreparedStatement => {
@@ -46,7 +47,9 @@ export function fakeD1(routes: FakeRoute[]): FakeD1 {
       log.push(sql);
       return stmt(sql);
     },
-    batch: async () => [],
+    // Every statement reports `batchChanges` changed rows (0 models a lost race).
+    batch: async (stmts: unknown[]) =>
+      stmts.map(() => ({ success: true, meta: { changes: batchChanges } as never, results: [] as never })),
     exec: async () => ({ count: 0, duration: 0 }),
     dump: async () => new ArrayBuffer(0),
   } as unknown as FakeD1;

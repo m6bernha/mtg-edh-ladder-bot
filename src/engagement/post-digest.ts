@@ -7,7 +7,7 @@
 
 import { getAllDigestTargets, getGuildBoard, getSeatsInWindow, setDigestChannel } from '../db/queries';
 import { createMessage } from '../discord/api';
-import { digestMessage } from '../discord/embeds';
+import { digestMessage } from '../discord/boards.ts';
 import { skillRating } from '../ratings/trueskill.ts';
 import type { Env } from '../types';
 import { buildDigest } from './digest.ts';

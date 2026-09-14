@@ -105,16 +105,70 @@ const startPayload = {
     resolved: { users: { u1: user('u1', 'Alice'), u2: user('u2', 'Bob'), u3: user('u3', 'Cara') } },
   },
 };
+const V2 = 1 << 15;
+const flat = (components) =>
+  (components ?? []).flatMap((c) => [c, ...flat(c.components), ...(c.accessory ? [c.accessory] : [])]);
+const texts = (data) => flat(data?.components).filter((c) => c.type === 10).map((c) => c.content).join('\n');
+const ids = (data) => flat(data?.components).map((c) => c.custom_id).filter(Boolean);
+
+let gameId = null;
 {
   const r = await post(startPayload);
   check(
-    '/game start → live card + pings',
+    '/game start → V2 live card + pings + buttons',
     r.status === 200 &&
       r.json.type === 4 &&
-      r.json.data?.embeds?.[0]?.title?.includes('in progress') &&
-      r.json.data?.content?.includes('<@u2>'),
+      (r.json.data?.flags & V2) === V2 &&
+      texts(r.json.data).includes('in progress') &&
+      texts(r.json.data).includes('<@u2>') &&
+      r.json.data?.allowed_mentions?.users?.includes('u2') &&
+      ids(r.json.data).some((id) => id.startsWith('rep:open:')),
     r,
   );
+  gameId = Number((ids(r.json.data).find((id) => id.startsWith('rep:open:')) ?? '').split(':')[2]);
+}
+
+// 3b. Card buttons — signed MESSAGE_COMPONENT / MODAL_SUBMIT interactions
+const component = (custom_id, extra = {}) => ({
+  ...baseInteraction,
+  type: 3,
+  message: { id: 'smoke-msg' },
+  data: { custom_id, component_type: 2, ...extra },
+});
+{
+  let r = await post(component(`rep:open:${gameId}`));
+  check(
+    'Report button → ephemeral V2 picker',
+    r.status === 200 && r.json.type === 4 && (r.json.data?.flags & 64) === 64 && (r.json.data?.flags & V2) === V2 &&
+      ids(r.json.data).includes(`rep:pick:${gameId}:f:-`),
+    r,
+  );
+  r = await post(component(`rep:pick:${gameId}:f:-`, { component_type: 3, values: ['1'] }));
+  check(
+    'Pick 1st → UPDATE_MESSAGE with the draft advanced',
+    r.status === 200 && r.json.type === 7 && ids(r.json.data).includes(`rep:pick:${gameId}:f:1`),
+    r,
+  );
+  r = await post(component(`rep:mode:${gameId}:d`));
+  check(
+    'Draw mode → confirm enabled',
+    r.status === 200 && r.json.type === 7 && ids(r.json.data).includes(`rep:confirm:${gameId}:d:-`),
+    r,
+  );
+  r = await post(component(`cxl:ask:${gameId}`));
+  check('Cancel button → ephemeral confirm', r.status === 200 && r.json.type === 4 && ids(r.json.data).includes(`cxl:yes:${gameId}`), r);
+  r = await post(component(`cxl:no:${gameId}`));
+  check('Keep playing → UPDATE_MESSAGE', r.status === 200 && r.json.type === 7, r);
+  r = await post(component(`cmd:open:${gameId}`));
+  check(
+    'Set commander (no recent decks) → modal',
+    r.status === 200 && (r.json.type === 9 ? r.json.data?.custom_id === `cmd:modal:${gameId}` : r.json.type === 4),
+    r,
+  );
+  r = await post({ ...baseInteraction, type: 5, data: { custom_id: `cmd:modal:${gameId}`, components: [{ type: 18, component: { type: 4, custom_id: 'q', value: 'atraxa preators' } }] } });
+  check('Modal submit → deferred ephemeral reply', r.status === 200 && r.json.type === 5 && (r.json.data?.flags & 64) === 64, r);
+  r = await post(component('nope:what:1'));
+  check('Unknown button → ephemeral refusal, not a crash', r.status === 200 && r.json.type === 4 && (r.json.data?.flags & 64) === 64, r);
 }
 
 // 4. Second /game start in same channel → friendly error
@@ -218,8 +272,8 @@ async function autocomplete(value) {
 {
   const r = await post({ ...baseInteraction, type: 2, data: { name: 'help' } });
   check(
-    '/help → embed',
-    r.status === 200 && r.json.type === 4 && r.json.data?.embeds?.[0]?.title?.includes('EDH Ladder'),
+    '/help → V2 container',
+    r.status === 200 && r.json.type === 4 && (r.json.data?.flags & V2) === V2 && texts(r.json.data).includes('EDH Ladder'),
     r,
   );
 }

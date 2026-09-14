@@ -146,7 +146,12 @@ const commands = [
       },
     ],
   },
-  { name: 'leaderboard', description: 'All-time ladder — SR, W-L, win%', contexts: [0] },
+  {
+    name: 'leaderboard',
+    description: 'The ladder — SR, record, form, movement',
+    contexts: [0],
+    options: [pageOption],
+  },
   {
     name: 'stats',
     description: 'Player profile: SR, placements, streak, commanders',

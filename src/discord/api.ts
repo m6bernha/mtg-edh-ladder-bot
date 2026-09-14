@@ -1,6 +1,20 @@
+import { IS_COMPONENTS_V2 } from './components.ts';
 import type { MessageData } from '../types';
 
 const API = 'https://discord.com/api/v10';
+
+/**
+ * The one place the Components V2 flag is set. A message with `components`
+ * gets the flag; a message with `content`/`embeds` must not have it. Mixing the
+ * two is a programming error and is caught here rather than as a Discord 400.
+ */
+export function withV2(data: MessageData): MessageData {
+  if (!data.components) return data;
+  if (data.content !== undefined || data.embeds !== undefined) {
+    throw new Error('a Components V2 message cannot carry content or embeds');
+  }
+  return { ...data, flags: (data.flags ?? 0) | IS_COMPONENTS_V2 };
+}
 
 // Discord sits behind Cloudflare, and its WAF silently rejects bot-authenticated
 // REST calls that lack a proper `DiscordBot (...)` User-Agent — as bare 403s that
@@ -23,13 +37,38 @@ export async function patchOriginal(
   token: string,
   data: MessageData,
 ): Promise<void> {
-  const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`, {
-    method: 'PATCH',
-    headers: JSON_HEADERS,
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) {
-    console.error(`patchOriginal failed: ${res.status} ${await res.text()}`);
+  try {
+    const res = await fetch(`${API}/webhooks/${applicationId}/${token}/messages/@original`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(withV2(data)),
+    });
+    if (!res.ok) {
+      console.error(`patchOriginal failed: ${res.status} ${await res.text()}`);
+    }
+  } catch (e) {
+    // A thrown fetch inside waitUntil would otherwise leave the user on the spinner.
+    console.error('patchOriginal threw:', e);
+  }
+}
+
+/**
+ * Post a follow-up message through the interaction webhook — public unless
+ * flagged ephemeral, and needing no channel permissions. Used when a button
+ * flow's result must reach the whole pod but the live card could not be edited.
+ */
+export async function followUp(applicationId: string, token: string, data: MessageData): Promise<void> {
+  try {
+    const res = await fetch(`${API}/webhooks/${applicationId}/${token}`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(withV2(data)),
+    });
+    if (!res.ok) {
+      console.error(`followUp failed: ${res.status} ${await res.text()}`);
+    }
+  } catch (e) {
+    console.error('followUp threw:', e);
   }
 }
 
@@ -80,7 +119,7 @@ async function botCall(
     const res = await fetch(url, {
       method,
       headers: { ...JSON_HEADERS, Authorization: `Bot ${botToken}` },
-      body: JSON.stringify(data),
+      body: JSON.stringify(withV2(data)),
     });
     if (!res.ok) {
       const text = await res.text();
