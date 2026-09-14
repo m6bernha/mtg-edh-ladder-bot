@@ -113,7 +113,8 @@ export async function getRoster(db: D1Database, gameId: number): Promise<RosterE
     .prepare(
       `SELECT gp.*, p.discord_user_id, p.username, p.ts_mu, p.ts_sigma
        FROM game_players gp JOIN players p ON p.id = gp.player_id
-       WHERE gp.game_id = ?`,
+       WHERE gp.game_id = ?
+       ORDER BY gp.player_id`,
     )
     .bind(gameId)
     .all<RosterEntry>();
@@ -151,33 +152,43 @@ export interface CompletionEntry {
   placement: number;
   muBefore: number;
   muAfter: number;
+  /** The stored sigma before the report — what /undo restores. */
   sigmaBefore: number;
   sigmaAfter: number;
+  /** Rust-inflated sigma fed to the engine, or null when none applied. */
+  sigmaRusted: number | null;
+  rustDays: number | null;
 }
 
-/** Atomically complete a game: game row + snapshots + player ratings. */
+/**
+ * Atomically complete a game: game row + snapshots + player ratings.
+ * `endedAt` may be supplied (the recompute replay passes the historical value);
+ * live reports use the current time.
+ */
 export async function completeGame(
   db: D1Database,
   gameId: number,
-  flags: { winnerOnly: boolean; draw: boolean },
+  flags: { winnerOnly: boolean; draw: boolean; topPlayerId?: number | null },
   reportedBy: string,
   entries: CompletionEntry[],
+  endedAt: number = now(),
 ): Promise<number> {
-  const endedAt = now();
   const stmts: D1PreparedStatement[] = [
     db
       .prepare(
-        `UPDATE games SET status = 'completed', ended_at = ?, winner_only = ?, draw = ?, reported_by = ?
+        `UPDATE games SET status = 'completed', ended_at = ?, winner_only = ?, draw = ?, reported_by = ?,
+           top_player_id = ?
          WHERE id = ? AND status = 'active'`,
       )
-      .bind(endedAt, flags.winnerOnly ? 1 : 0, flags.draw ? 1 : 0, reportedBy, gameId),
+      .bind(endedAt, flags.winnerOnly ? 1 : 0, flags.draw ? 1 : 0, reportedBy, flags.topPlayerId ?? null, gameId),
   ];
   for (const e of entries) {
     stmts.push(
       db
         .prepare(
           `UPDATE game_players SET placement = ?,
-             mu_before = ?, mu_after = ?, sigma_before = ?, sigma_after = ?
+             mu_before = ?, mu_after = ?, sigma_before = ?, sigma_after = ?,
+             sigma_rusted = ?, rust_days = ?
            WHERE game_id = ? AND player_id = ?`,
         )
         .bind(
@@ -186,6 +197,8 @@ export async function completeGame(
           e.muAfter,
           e.sigmaBefore,
           e.sigmaAfter,
+          e.sigmaRusted,
+          e.rustDays,
           gameId,
           e.playerId,
         ),
@@ -308,13 +321,15 @@ export interface PlayerGameRow {
   mu_after: number;
   sigma_before: number;
   sigma_after: number;
+  /** Ladder leader before this game (Kingslayer); null pre-migration. */
+  top_player_id: number | null;
 }
 
 /** Every completed game for one player, newest first — feeds all of /stats. */
 export async function getPlayerGames(db: D1Database, playerId: number): Promise<PlayerGameRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket,
+      `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket, g.top_player_id,
               gp.placement, gp.commander,
               gp.mu_before, gp.mu_after, gp.sigma_before, gp.sigma_after
        FROM game_players gp JOIN games g ON g.id = gp.game_id
@@ -323,6 +338,27 @@ export async function getPlayerGames(db: D1Database, playerId: number): Promise<
     )
     .bind(playerId)
     .all<PlayerGameRow>();
+  return results;
+}
+
+export interface PlayerGameRowWithId extends PlayerGameRow {
+  player_id: number;
+}
+
+/** getPlayerGames for several players at once (newest first), one query — feeds report shoutouts. */
+export async function getGamesForPlayers(db: D1Database, playerIds: number[]): Promise<PlayerGameRowWithId[]> {
+  if (playerIds.length === 0) return [];
+  const { results } = await db
+    .prepare(
+      `SELECT gp.player_id, g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket, g.top_player_id,
+              gp.placement, gp.commander,
+              gp.mu_before, gp.mu_after, gp.sigma_before, gp.sigma_after
+       FROM game_players gp JOIN games g ON g.id = gp.game_id
+       WHERE gp.player_id IN (${playerIds.map(() => '?').join(',')}) AND g.status = 'completed'
+       ORDER BY g.ended_at DESC, g.id DESC`,
+    )
+    .bind(...playerIds)
+    .all<PlayerGameRowWithId>();
   return results;
 }
 
@@ -353,5 +389,254 @@ export async function getSharedGames(
     )
     .bind(playerAId, playerBId, guildId)
     .all<VsRow>();
+  return results;
+}
+
+// ---- Rating dynamics ----
+
+/** When each player last finished a completed game (seconds), for rust. Absent = never. */
+export async function getLastPlayedAt(db: D1Database, playerIds: number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (playerIds.length === 0) return out;
+  const { results } = await db
+    .prepare(
+      `SELECT gp.player_id, MAX(g.ended_at) AS last_at
+       FROM game_players gp JOIN games g ON g.id = gp.game_id
+       WHERE g.status = 'completed' AND gp.player_id IN (${playerIds.map(() => '?').join(',')})
+       GROUP BY gp.player_id`,
+    )
+    .bind(...playerIds)
+    .all<{ player_id: number; last_at: number | null }>();
+  for (const r of results) if (r.last_at != null) out.set(r.player_id, r.last_at);
+  return out;
+}
+
+export interface BoardEntry {
+  playerId: number;
+  username: string;
+  mu: number;
+  sigma: number;
+  games: number;
+}
+
+/** Every rated player in the guild (has ≥1 completed game), unsorted — callers rank by SR. */
+export async function getGuildBoard(db: D1Database, guildId: string): Promise<BoardEntry[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT p.id AS playerId, p.username, p.ts_mu AS mu, p.ts_sigma AS sigma, COUNT(gp.game_id) AS games
+       FROM players p
+       JOIN game_players gp ON gp.player_id = p.id
+       JOIN games g ON g.id = gp.game_id AND g.status = 'completed'
+       WHERE p.guild_id = ?
+       GROUP BY p.id`,
+    )
+    .bind(guildId)
+    .all<BoardEntry>();
+  return results;
+}
+
+// ---- Meta / history ----
+
+export interface CommanderMetaRow {
+  commander: string;
+  games: number;
+  wins: number;
+  draws: number;
+  avg_placement: number | null;
+  pilots: number;
+}
+
+export async function getCommanderMeta(
+  db: D1Database,
+  guildId: string,
+  opts: { minGames: number; limit: number; offset: number },
+): Promise<CommanderMetaRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT gp.commander,
+              COUNT(*) AS games,
+              SUM(CASE WHEN gp.placement = 1 AND g.draw = 0 THEN 1 ELSE 0 END) AS wins,
+              SUM(CASE WHEN g.draw = 1 THEN 1 ELSE 0 END) AS draws,
+              AVG(CASE WHEN g.draw = 0 AND (g.winner_only = 0 OR gp.placement = 1) THEN gp.placement END) AS avg_placement,
+              COUNT(DISTINCT gp.player_id) AS pilots
+       FROM game_players gp JOIN games g ON g.id = gp.game_id
+       WHERE g.guild_id = ? AND g.status = 'completed' AND gp.commander IS NOT NULL
+       GROUP BY gp.commander
+       HAVING games >= ?
+       ORDER BY games DESC, wins DESC, gp.commander
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(guildId, opts.minGames, opts.limit, opts.offset)
+    .all<CommanderMetaRow>();
+  return results;
+}
+
+export async function getCommanderMetaCount(db: D1Database, guildId: string, minGames: number): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM (
+         SELECT gp.commander FROM game_players gp JOIN games g ON g.id = gp.game_id
+         WHERE g.guild_id = ? AND g.status = 'completed' AND gp.commander IS NOT NULL
+         GROUP BY gp.commander HAVING COUNT(*) >= ?)`,
+    )
+    .bind(guildId, minGames)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export interface HistoryRow {
+  game_id: number;
+  started_at: number;
+  ended_at: number;
+  draw: number;
+  winner_only: number;
+  bracket: string;
+  pod_size: number;
+  winner_name: string | null;
+  winner_commander: string | null;
+}
+
+const PLAYER_IN_GAME = 'AND EXISTS (SELECT 1 FROM game_players f WHERE f.game_id = g.id AND f.player_id = ?)';
+
+/** Recent completed games, newest first, optionally only those a player sat in. */
+export async function getRecentGames(
+  db: D1Database,
+  guildId: string,
+  opts: { limit: number; offset: number; playerId?: number },
+): Promise<HistoryRow[]> {
+  const filter = opts.playerId != null ? PLAYER_IN_GAME : '';
+  const binds: (string | number)[] = [guildId];
+  if (opts.playerId != null) binds.push(opts.playerId);
+  binds.push(opts.limit, opts.offset);
+  const { results } = await db
+    .prepare(
+      `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, g.winner_only, g.bracket,
+              (SELECT COUNT(*) FROM game_players c WHERE c.game_id = g.id) AS pod_size,
+              w.username AS winner_name, wp.commander AS winner_commander
+       FROM games g
+       LEFT JOIN game_players wp ON wp.game_id = g.id AND wp.placement = 1 AND g.draw = 0
+       LEFT JOIN players w ON w.id = wp.player_id
+       WHERE g.guild_id = ? AND g.status = 'completed' ${filter}
+       GROUP BY g.id
+       ORDER BY g.ended_at DESC, g.id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .bind(...binds)
+    .all<HistoryRow>();
+  return results;
+}
+
+export async function getRecentGamesCount(db: D1Database, guildId: string, playerId?: number): Promise<number> {
+  const filter = playerId != null ? PLAYER_IN_GAME : '';
+  const binds: (string | number)[] = playerId != null ? [guildId, playerId] : [guildId];
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM games g WHERE g.guild_id = ? AND g.status = 'completed' ${filter}`)
+    .bind(...binds)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export interface PodSnapshotRow {
+  game_id: number;
+  player_id: number;
+  placement: number | null;
+  mu_before: number | null;
+  sigma_before: number | null;
+  sigma_rusted: number | null;
+}
+
+/** Every seat's pre-game snapshot for every completed game one player sat in — one query, any history size. */
+export async function getPodSnapshotsForPlayer(db: D1Database, playerId: number): Promise<Map<number, PodSnapshotRow[]>> {
+  const out = new Map<number, PodSnapshotRow[]>();
+  const { results } = await db
+    .prepare(
+      `SELECT o.game_id, o.player_id, o.placement, o.mu_before, o.sigma_before, o.sigma_rusted
+       FROM game_players me
+       JOIN game_players o ON o.game_id = me.game_id
+       JOIN games g ON g.id = me.game_id AND g.status = 'completed'
+       WHERE me.player_id = ?`,
+    )
+    .bind(playerId)
+    .all<PodSnapshotRow>();
+  for (const r of results) {
+    const list = out.get(r.game_id) ?? [];
+    list.push(r);
+    out.set(r.game_id, list);
+  }
+  return out;
+}
+
+// ---- Settings / digest ----
+
+export interface SettingsRow {
+  guild_id: string;
+  digest_channel_id: string | null;
+}
+
+export async function getSettings(db: D1Database, guildId: string): Promise<SettingsRow | null> {
+  return db
+    .prepare('SELECT guild_id, digest_channel_id FROM settings WHERE guild_id = ?')
+    .bind(guildId)
+    .first<SettingsRow>();
+}
+
+export async function getAllDigestTargets(db: D1Database): Promise<SettingsRow[]> {
+  const { results } = await db
+    .prepare('SELECT guild_id, digest_channel_id FROM settings WHERE digest_channel_id IS NOT NULL')
+    .all<SettingsRow>();
+  return results;
+}
+
+export async function setDigestChannel(
+  db: D1Database,
+  guildId: string,
+  channelId: string | null,
+  byUserId: string,
+): Promise<void> {
+  const res = await db
+    .prepare(
+      `INSERT INTO settings (guild_id, digest_channel_id, updated_at, updated_by) VALUES (?, ?, ?, ?)
+       ON CONFLICT (guild_id) DO UPDATE SET digest_channel_id = excluded.digest_channel_id,
+         updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    )
+    .bind(guildId, channelId, now(), byUserId)
+    .run();
+  assertWrote(res, 'saving settings');
+}
+
+export interface DigestSeatRow {
+  game_id: number;
+  started_at: number;
+  ended_at: number;
+  draw: number;
+  player_id: number;
+  username: string;
+  placement: number | null;
+  commander: string | null;
+  mu_before: number | null;
+  sigma_before: number | null;
+  mu_after: number | null;
+  sigma_after: number | null;
+}
+
+/** Every seat of every completed game in a time window — the digest derives everything from this. */
+export async function getSeatsInWindow(
+  db: D1Database,
+  guildId: string,
+  sinceTs: number,
+  untilTs: number,
+): Promise<DigestSeatRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT g.id AS game_id, g.started_at, g.ended_at, g.draw, gp.player_id, p.username, gp.placement,
+              gp.commander, gp.mu_before, gp.sigma_before, gp.mu_after, gp.sigma_after
+       FROM games g
+       JOIN game_players gp ON gp.game_id = g.id
+       JOIN players p ON p.id = gp.player_id
+       WHERE g.guild_id = ? AND g.status = 'completed' AND g.ended_at > ? AND g.ended_at <= ?
+       ORDER BY g.ended_at, g.id`,
+    )
+    .bind(guildId, sinceTs, untilTs)
+    .all<DigestSeatRow>();
   return results;
 }

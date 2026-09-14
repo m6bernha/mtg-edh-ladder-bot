@@ -7,6 +7,10 @@ import {
 import { handleCommander } from './commands/commander';
 import { handleLeaderboard, handleStats, handleVs } from './commands/boards';
 import { handleUndo } from './commands/undo';
+import { handleMeta } from './commands/meta';
+import { handleHistory } from './commands/history';
+import { handlePredict } from './commands/predict';
+import { handleConfig } from './commands/config';
 import { errorMessage, helpMessage } from './discord/embeds';
 import { fetchOriginalMessageId, json, patchOriginal } from './discord/api';
 import { getActiveGame, setGameMessageId } from './db/queries';
@@ -57,6 +61,13 @@ const COMMANDS: Record<string, CommandSpec> = {
   stats: { handler: handleStats, mode: 'deferred' },
   vs: { handler: handleVs, mode: 'deferred' },
   undo: { handler: handleUndo, mode: 'deferred' },
+  meta: { handler: handleMeta, mode: 'deferred' },
+  history: { handler: handleHistory, mode: 'deferred' },
+  predict: { handler: handlePredict, mode: 'deferred' },
+
+  // Admin settings — private.
+  'config digest-channel': { handler: handleConfig, mode: 'deferred', ephemeral: true },
+  'config digest-off': { handler: handleConfig, mode: 'deferred', ephemeral: true },
 };
 
 function commandKey(i: Interaction): string {

@@ -5,7 +5,7 @@
 //   node scripts/local-smoke.mjs run      → fires signed interactions at :8787
 //
 // Start the dev server between the two steps:
-//   npx wrangler dev --port 8787 --var DISCORD_PUBLIC_KEY:<hex from keygen>
+//   npx wrangler dev --port 8787 --test-scheduled --var DISCORD_PUBLIC_KEY:<hex from keygen>
 
 import { createPrivateKey, generateKeyPairSync, sign as edSign } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -187,7 +187,34 @@ async function autocomplete(value) {
   );
 }
 
-// 7. /help inline
+// 7. Readouts and settings — all deferred acks (the bodies land via webhook, out of reach here).
+{
+  const deferred = async (label, data, ephemeral = false) => {
+    const r = await post({ ...baseInteraction, type: 2, data });
+    check(
+      `${label} → deferred ack${ephemeral ? ' (ephemeral)' : ''}`,
+      r.status === 200 && r.json.type === 5 && (!ephemeral || (r.json.data?.flags & 64) === 64),
+      r,
+    );
+  };
+  await deferred('/meta', { name: 'meta' });
+  await deferred('/history', { name: 'history', options: [{ type: 4, name: 'page', value: 1 }] });
+  await deferred('/predict', { name: 'predict' });
+  await deferred(
+    '/config digest-channel',
+    { name: 'config', options: [{ type: 1, name: 'digest-channel', options: [{ type: 7, name: 'channel', value: 'smoke-channel' }] }] },
+    true,
+  );
+}
+
+// 8. Cron: the weekly digest handler (needs `wrangler dev --test-scheduled`)
+{
+  const res = await fetch(`${BASE}/cdn-cgi/handler/scheduled?cron=0+18+*+*+1`);
+  if (res.status === 200) console.log('  ✅ scheduled handler ran (digest)');
+  else console.log(`  ↳ scheduled endpoint returned ${res.status} — start wrangler dev with --test-scheduled to exercise it`);
+}
+
+// 9. /help inline
 {
   const r = await post({ ...baseInteraction, type: 2, data: { name: 'help' } });
   check(

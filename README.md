@@ -44,13 +44,17 @@ The design decisions behind all of this are written up in
 |---|---|
 | `/game start` | Start a game in this channel: `@` the pod (2–6 players — 1v1 works too), optional bracket. Posts the live match card; a relative timer ticks on it. |
 | `/commander` | Log your commander for the game. Autocomplete is instant and typo-tolerant (`atraxa preators`, `urdragon`, `lim dul` all work) and its art appears on the card. Optional `partner` for Partner / Background / Friends Forever decks, stored as one deck identity. Confirms only to you. |
-| `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Posts the final card with SR deltas for the whole pod, and stops the live timer. |
+| `/game report` | Report placements (1st…Nth). Flags: `winner_only` (only 1st counts, rest tied), `draw` (placement ignored). Posts the final card with SR deltas for the whole pod plus a 📣 block — rank changes, streaks, upsets, milestones — and stops the live timer. |
 | `/game bracket` | Set or correct the game's bracket mid-match, or after reporting. |
 | `/game cancel` | Abort the active game. Nothing is recorded. |
 | `/undo` | Revert the most recent completed game and restore every player's exact prior rating. Participants and admins only. |
 | `/leaderboard` | All-time ladder: SR, W–L, win %. |
-| `/stats` | Player profile: SR, placement spread, current streak, recent form, commanders. |
+| `/stats` | Player profile: ladder rank, SR, placement spread, current streak, recent form, commanders, badges. |
 | `/vs` | Head-to-head between two players. |
+| `/meta` | The commander meta: games, wins, win %, average finish and pilot count per commander (3+ games). Paginated. |
+| `/history` | Recent games — winner and their commander, pod size, bracket, length. Optional `player` filter. Paginated. |
+| `/predict` | Win odds for the pod in progress, from everyone's rating, plus a match-quality score. |
+| `/config digest-channel` | Admins: post a weekly ladder digest (games, most active, biggest climber, commander of the week, top 3) to a channel every Monday. `/config digest-off` stops it. |
 | `/help` | In-Discord cheatsheet. |
 
 The **live match card** is the centrepiece: `/game start` posts one message, and
@@ -70,6 +74,19 @@ A fresh player (μ 25, σ 8.33) starts near 500. Early games move SR quickly bec
 system is resolving *uncertainty* (σ shrinking), not because the player improved — this is
 expected and settles down. Beating a stronger pod moves SR more than beating a weaker one.
 SR is the only rating; there is no second number to reconcile.
+
+Two things keep a closed group's ladder from freezing (see
+[ARCHITECTURE.md → Rating dynamics](ARCHITECTURE.md#rating-dynamics)):
+
+- **Motion.** Uncertainty never collapses to nothing, so a settled player's 4-pod win is
+  still worth about +45 SR, not +6.
+- **Rust 🦀.** Sit out for more than a week and your uncertainty grows again — roughly
+  −50 SR at two weeks, −135 at a month — so your next games move you faster. One good night
+  repairs a month away. The 📣 block on the report says when rust applied.
+
+Every knob lives in `src/ratings/config.ts`. After changing one, `npm run recompute-ratings`
+replays the whole history under the new numbers (dry run by default; `-- --apply` takes a
+backup first, then writes).
 
 Brackets follow the official Commander bracket system (Open, 1 Exhibition → 5 cEDH) and are
 recorded per game.
@@ -201,7 +218,16 @@ npx wrangler d1 execute edh-ladder --remote --file migrations/0002_drop_elo.sql
 npx wrangler d1 execute edh-ladder --remote --file migrations/0003_commander_index.sql
 npm run sync-commanders            # fill the new commander index
 npm run backfill-commanders        # report historical names the index spells differently
+npx wrangler d1 execute edh-ladder --remote --file migrations/0004_dynamics.sql
+npm run recompute-ratings          # dry run: shows every player's SR before/after
+npm run recompute-ratings -- --apply
 ```
+
+`recompute-ratings` replays every completed game through the current rating engine (the
+same code the Worker runs) so history adopts the rust + motion dynamics instead of only
+future games. It refuses to run while a game is active and takes a `wrangler d1 export`
+into `backups/` before writing. Tell the pod: every SR in the channel scrollback becomes
+history at that point.
 
 `backfill-commanders` only reports by default. It lists the stored names it would re-link
 (exact or unambiguous index matches) and the ones it refuses to guess at; re-run with
@@ -253,11 +279,13 @@ src/
   commanders/       Local commander index: pure tiered search, aliases, Scryfall page parser
   scryfall.ts       Live Scryfall lookups — the fallback while the index is empty
   commands/         One module per command surface
+  services/         reportGame — the single write path for finishing a game
+  engagement/       Shoutouts, badges and the weekly digest (pure) + the cron poster
   db/               D1 queries and rating snapshot handling
-  ratings/          TrueSkill (SR)
+  ratings/          TrueSkill (SR), the tunables, rust, /predict
   discord/          API calls, embeds, and the live match card (card.ts, live-card.ts)
 test/               Vitest unit tests
-scripts/            Command registration, commander index sync/backfill, doctor, smoke tests
+scripts/            Command registration, index sync/backfill, rating recompute, doctor, smoke tests
 schema.sql          Database schema (post-migration shape, for fresh installs)
 migrations/         Ordered ALTER migrations for existing deployments
 assets/             Bot avatar

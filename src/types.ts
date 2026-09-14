@@ -100,6 +100,8 @@ export interface GameRow {
   created_by: string;
   reported_by: string | null;
   message_id: string | null;
+  /** Ladder leader before this game was reported (null before migration 0004 / no leader). */
+  top_player_id: number | null;
 }
 
 export interface GamePlayerRow {
@@ -112,6 +114,9 @@ export interface GamePlayerRow {
   mu_after: number | null;
   sigma_before: number | null;
   sigma_after: number | null;
+  /** Rust-inflated sigma actually fed to the engine; null when no rust applied. */
+  sigma_rusted: number | null;
+  rust_days: number | null;
 }
 
 /** game_players joined with its player row — the usual working shape. */
