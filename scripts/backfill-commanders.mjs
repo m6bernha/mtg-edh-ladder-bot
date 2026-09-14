@@ -28,19 +28,29 @@ const apply = args.has('--apply');
 
 const dir = mkdtempSync(join(tmpdir(), 'edh-backfill-'));
 let fileNo = 0;
-/** Every statement goes through --file: the CLI cannot bind parameters and a
- *  --command string would need shell escaping. `--json` returns the rows. */
-function d1(sql) {
-  const file = join(dir, `q-${++fileNo}.sql`);
-  writeFileSync(file, sql + NL);
-  const out = execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --json --file "${file}"`, {
+/**
+ * Reads go through --command: against a remote database, --file runs as an
+ * import and returns only statistics, not rows. The SQL here is fixed text
+ * (no user input) and contains no double quotes, so it is shell-safe as is.
+ */
+function query(sql) {
+  if (sql.includes('"')) throw new Error('read queries must not contain double quotes');
+  const out = execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --json --command "${sql.replace(/\s+/g, ' ').trim()}"`, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   });
-  const parsed = JSON.parse(out.slice(out.indexOf('[')));
-  return parsed[0].results;
+  return JSON.parse(out.slice(out.indexOf('[')))[0].results;
 }
-const query = d1;
+
+/** Writes go through --file (no shell quoting, any size). */
+function d1(sql) {
+  const file = join(dir, `q-${++fileNo}.sql`);
+  writeFileSync(file, sql + NL);
+  execSync(`npx wrangler d1 execute ${DB_NAME} ${target} --file "${file}"`, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+}
 
 const indexRows = query(
   'SELECT name, norm_name, short_name, norm_short, front_name, color_identity, edhrec_rank, partner_flags FROM commanders',
