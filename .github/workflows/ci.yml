@@ -33,7 +33,13 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      # Fails the build on a known-vulnerable dependency. Kept at `high` so
-      # advisories that matter block a merge without low-severity noise doing so.
-      - name: Audit dependencies
+      # Blocks on a known-vulnerable RUNTIME dependency: only those ship in the
+      # Worker bundle. Kept at `high` so low-severity noise does not block.
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      # Dev tooling is still audited and shows as a warning, but does not block.
+      # 2026-11: picomatch GHSA-fc5q-39xc-vjpf covered every published version.
+      - name: Audit dev dependencies (advisory)
+        continue-on-error: true
         run: npm audit --audit-level=high
