@@ -25,6 +25,7 @@
     "wrangler": "^4.112.0"
   },
   "overrides": {
-    "mathjs": "^15.2.0"
+    "mathjs": "^15.2.0",
+    "vite": "^6.4.6"
   }
 }
