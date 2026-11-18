@@ -101,12 +101,13 @@ describe('statsMessage', () => {
     best: { name: 'Edgar Markov', winPct: 60, games: 5 },
     badges: [{ id: 'first-blood', emoji: '🩸', label: 'First Blood', description: 'Won a pod', earnedAt: 1 }],
   };
-  it('renders rank, sparkline, brackets, rivals, badges with the most-played art as a thumbnail', () => {
+  it('renders position (no rating), brackets, rivals, badges with the most-played art as a thumbnail', () => {
     const m = statsMessage(view);
     withinLimits(m);
     const t = texts(m);
-    expect(t).toContain('#3 of 12');
-    expect(t).toContain('`▁▃▂▆█`');
+    expect(t).toContain('**#3** of 12');
+    expect(t).not.toMatch(/SR|μ|σ/);
+    expect(t).not.toContain('`▁▃▂▆█`');
     expect(t).toContain('Bracket 3 8/20');
     expect(t).toContain('Nemesis: **Bob**');
     expect(t).toContain('First Blood');

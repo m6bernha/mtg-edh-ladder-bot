@@ -68,7 +68,7 @@ describe('buildShoutouts', () => {
     expect(buildShoutouts({ ...quiet, pod: p }).some((l) => l.startsWith('😱'))).toBe(false);
   });
 
-  it('personal best, first win, milestone, rust, skid', () => {
+  it('no rating-based personal best; first win, milestone, rust, skid', () => {
     const p = pod(1);
     p[0].srAfter = 700;
     p[0].personalBestBefore = 690;
@@ -79,7 +79,6 @@ describe('buildShoutouts', () => {
     const out = buildShoutouts({ ...quiet, pod: p });
     expect(out).toEqual([
       '💪 **Ann** snaps a 3-game skid',
-      '🏅 **Ann** hits a personal-best SR of 700',
       '🎉 **Ann** wins their first pod!',
       '🎲 **Bob** plays game #10',
       '🦀 **Cy** was 20 days rusty — rating moves faster until it settles',

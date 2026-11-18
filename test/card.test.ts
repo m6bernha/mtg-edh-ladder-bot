@@ -143,10 +143,10 @@ describe('renderMatchCard — completed phase', () => {
     expect(allText(card)).not.toContain('<@');
   });
 
-  it('orders players by finish with medals and a signed SR delta', () => {
+  it('orders players by finish with medals and hides the rating', () => {
     const t = allText(card);
     expect(t.indexOf('🥇 **Alice**')).toBeLessThan(t.indexOf('🥈 **Bob**'));
-    expect(t).toMatch(/SR \*\*\d+\*\* \(\+\d+\)/);
+    expect(t).not.toMatch(/SR/);
   });
 
   it('reports match length instead of a live timer, and notes rust', () => {

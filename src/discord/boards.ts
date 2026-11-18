@@ -23,7 +23,7 @@ import {
   type ContainerChild,
 } from './components.ts';
 import { encodeId } from './custom-id.ts';
-import { COLORS, MEDALS, bracketLabel, fmtDuration, signed } from './embeds';
+import { COLORS, MEDALS, bracketLabel, fmtDuration } from './embeds';
 
 // ---- helpers ----
 
@@ -84,7 +84,8 @@ export interface LeaderboardView {
 const NAME_W = 13;
 
 export function leaderboardMessage(v: LeaderboardView): MessageData {
-  const header = ' #   Player          SR   W-L    Win%  Form';
+  // The rating itself is never shown: position is the only ranking signal on display.
+  const header = ' #   Player        W-L    Win%  Form';
   const lines = v.entries.map((e) => {
     const move =
       e.previousRank == null || e.previousRank === e.rank ? ' ' : e.previousRank > e.rank ? '▲' : '▼';
@@ -93,10 +94,10 @@ export function leaderboardMessage(v: LeaderboardView): MessageData {
     const name = (e.username.slice(0, NAME_W) + (e.provisional ? '*' : '')).padEnd(NAME_W + 1);
     const rec = `${e.wins}-${e.losses}${e.draws ? `-${e.draws}D` : ''}`.padEnd(7);
     const games = e.wins + e.losses + e.draws;
-    return `${rank} ${name} ${String(e.sr).padStart(4)}  ${rec}${pct(e.wins, games).padStart(4)}  ${e.form.join('')}${medal ? ' ' + medal : ''}`;
+    return `${rank} ${name} ${rec}${pct(e.wins, games).padStart(4)}  ${e.form.join('')}${medal ? ' ' + medal : ''}`;
   });
   const children: ContainerChild[] = [
-    text(`## 🏆 The ladder\n-# ${v.total} rated player${v.total === 1 ? '' : 's'} · SR = TrueSkill rank · \`*\` still settling · ▲▼ vs before their last game`),
+    text(`## 🏆 The ladder\n-# ${v.total} ranked player${v.total === 1 ? '' : 's'} · \`*\` still settling · ▲▼ vs before their last game`),
     text('```\n' + [header, ...lines].join('\n') + '\n```'),
   ];
   if (v.pages > 1) children.push(pager('lb', v.page, v.pages));
@@ -134,8 +135,8 @@ export interface StatsView {
 
 export function statsMessage(v: StatsView): MessageData {
   const title = text(
-    `## 📊 ${v.username}${v.rank ? `  ·  #${v.rank.rank} of ${v.rank.of}` : ''}\n` +
-      `SR **${v.sr}**  ·  μ ${v.mu.toFixed(1)} · σ ${v.sigma.toFixed(1)}${v.sigma > 6 ? ' · still settling' : ''}`,
+    `## 📊 ${v.username}\n` +
+      `${v.rank ? `Ladder position **#${v.rank.rank}** of ${v.rank.of}` : 'Not on the ladder yet'}${v.sigma > 6 ? ' · still settling' : ''}`,
   );
   const head = v.mostPlayed?.art ? section(thumb(v.mostPlayed.art, v.mostPlayed.name), title) : title;
 
@@ -170,8 +171,7 @@ export function statsMessage(v: StatsView): MessageData {
         text(
           `**Record** ${v.wins}W-${v.losses}L${v.draws ? `-${v.draws}D` : ''} · ${v.winPct}% · ${v.games} games\n` +
             `**Placements** ${placements || '—'}\n` +
-            `**Momentum** streak **${v.streak}** · form ${v.form.join(' ')} · SR ${signed(v.srTrendRecent)} over last ${v.form.length}` +
-            (v.srSeries.length > 1 ? `  \`${sparkline(v.srSeries)}\`` : '') +
+            `**Momentum** streak **${v.streak}** · form ${v.form.join(' ')}` +
             `\n**Pace** avg game ${fmtDuration(v.avgDuration)}\n` +
             `**By bracket** ${brackets}` +
             (rivals ? `\n${rivals}` : ''),
@@ -269,7 +269,7 @@ export function predictMessage(v: PredictView): MessageData {
   const lines = v.entries.map(
     (e) =>
       `\`${bar(e.winPct)}\` **${Math.round(e.winPct * 100)}%** ${e.username}` +
-      ` · SR ${e.sr}${e.rusted ? ' 🦀' : ''}${e.commander ? ` · *${e.commander}*` : ''}`,
+      `${e.rusted ? ' 🦀' : ''}${e.commander ? ` · *${e.commander}*` : ''}`,
   );
   const q = Math.round(v.quality * 100);
   const verdict = q >= 60 ? 'an even table' : q >= 35 ? 'a slight favourite' : 'a lopsided pod';
@@ -292,7 +292,7 @@ export function predictMessage(v: PredictView): MessageData {
 export function digestMessage(v: DigestView, sinceTs: number): MessageData {
   const lines: string[] = [];
   if (v.mostActive) lines.push(`**Most active** ${v.mostActive.username} · ${v.mostActive.games} games`);
-  if (v.biggestClimber) lines.push(`**Biggest climber** ${v.biggestClimber.username} · ${signed(v.biggestClimber.delta)} SR`);
+  if (v.biggestClimber) lines.push(`**Biggest climber** ${v.biggestClimber.username}`);
   if (v.commanderOfWeek) {
     lines.push(`**Commander of the week** ${v.commanderOfWeek.name} · ${v.commanderOfWeek.games} games, ${v.commanderOfWeek.wins} wins`);
   }
@@ -303,7 +303,7 @@ export function digestMessage(v: DigestView, sinceTs: number): MessageData {
     text(lines.join('\n') || '—'),
   ];
   if (v.top3.length) {
-    children.push(sep(1), text(`**Top of the ladder**\n${v.top3.map((t, i) => `${MEDALS[i]} **${t.username}** · ${t.sr}`).join('\n')}`));
+    children.push(sep(1), text(`**Top of the ladder**\n${v.top3.map((t, i) => `${MEDALS[i]} **${t.username}**`).join('\n')}`));
   }
   children.push(text('-# `/leaderboard` · `/stats` · `/meta`'));
   return { components: [container(COLORS.gold, ...children)] };
@@ -336,15 +336,15 @@ export function helpMessage(): MessageData {
         sep(1),
         text(
           '**📊 The ladder**\n' +
-            '`/leaderboard` — ranking by SR, with form and movement.\n' +
-            "`/stats` — your (or anyone's) profile: rank, SR trend, placements, brackets, rivals, commanders, badges.\n" +
+            '`/leaderboard` — ladder positions, with form and movement.\n' +
+            "`/stats` — your (or anyone's) profile: position, placements, brackets, rivals, commanders, badges.\n" +
             '`/vs` — head-to-head between two players.\n' +
             '`/meta` — the commander meta.  `/history` — recent games.  `/predict` — win odds for the pod in progress.',
         ),
         sep(1),
         text(
-          '**🎯 How rating works**\n' +
-            '**SR** is your rank — a TrueSkill number that handles free-for-all pods and models uncertainty. Fresh players start near **500** and move fast until the system is confident, then settle — but never freeze: every game keeps ratings in motion, and a player who sits out for more than a week gets **rusty** 🦀 (uncertainty grows, so their next games move them faster, up or down). Beating a stronger pod is worth more than beating a weaker one.',
+          '**🎯 How the ladder works**\n' +
+            'Positions come from a hidden TrueSkill rating that handles free-for-all pods. New players move fast until the system is confident, then settle. Sit out for more than a week and you get **rusty** 🦀: your next games move you faster, up or down. Beating a stronger pod is worth more than beating a weaker one.',
         ),
         sep(1),
         text('**🛠️ Admins** `/config digest-channel #channel` — a weekly ladder digest, Mondays. `/config digest-off` stops it.'),

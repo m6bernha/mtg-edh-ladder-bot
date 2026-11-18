@@ -1,5 +1,5 @@
 import { skillRating } from '../ratings/trueskill.ts';
-import { COLORS, MEDALS, bracketLabel, fmtDuration, signed } from './embeds';
+import { COLORS, MEDALS, bracketLabel, fmtDuration } from './embeds';
 import {
   ButtonStyle,
   button,
@@ -135,14 +135,10 @@ function orderPlayers(s: MatchCardState): CardPlayer[] {
 function playerLine(p: CardPlayer, s: MatchCardState, idx: number): string {
   let head: string;
   if (s.phase === 'active') {
-    head = `**${p.username}**${p.srBefore != null ? ` · SR ${p.srBefore}` : ''}`;
+    head = `**${p.username}**`;
   } else {
     const medal = s.draw ? '🤝' : (MEDALS[(p.placement ?? idx + 1) - 1] ?? `${p.placement}.`);
-    const sr =
-      p.srAfter != null
-        ? ` · SR **${p.srAfter}**${p.srBefore != null ? ` (${signed(p.srAfter - p.srBefore)})` : ''}`
-        : '';
-    head = `${medal} **${p.username}**${sr}`;
+    head = `${medal} **${p.username}**`;
   }
   const deck = p.commander
     ? `*${p.commander}*`

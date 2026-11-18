@@ -85,13 +85,6 @@ export function buildShoutouts(input: ShoutoutInput): string[] {
     }
   }
 
-  // Personal bests.
-  for (const p of pod) {
-    if (p.personalBestBefore > 0 && p.srAfter > p.personalBestBefore) {
-      out.push(`🏅 **${p.username}** hits a personal-best SR of ${p.srAfter}`);
-    }
-  }
-
   // First win ever.
   if (winner && !winner.hasWonBefore) {
     out.push(`🎉 **${winner.username}** wins their first pod!`);
